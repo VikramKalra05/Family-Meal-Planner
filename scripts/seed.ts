@@ -255,6 +255,35 @@ async function wikiThumbnail(article: string): Promise<string | null> {
   return null;
 }
 
+// Recipes whose photo lives in public/photos/ (Wikimedia images downloaded,
+// visually verified against the dish, and committed to the repo — no hotlink,
+// no runtime API dependency). See src/data/photo-credits.md for provenance.
+const LOCAL_PHOTOS: Record<string, string> = {
+  "moong dal chilla": "/photos/moong-dal-chilla.jpg",
+  "besan chilla": "/photos/besan-chilla.jpg",
+  "oats porridge": "/photos/oats-porridge.jpg",
+  "sprouts chaat": "/photos/sprouts-chaat.jpg",
+  "jeera aloo": "/photos/jeera-aloo.jpg",
+  "cabbage poriyal": "/photos/cabbage-poriyal.jpg",
+  "mixed vegetable sabzi": "/photos/mixed-vegetable-sabzi.jpg",
+  "lauki chana dal": "/photos/lauki-chana-dal.jpg",
+  "soy chunk curry": "/photos/soy-chunk-curry.jpg",
+  "steamed rice": "/photos/steamed-rice.jpg",
+  "jeera rice": "/photos/jeera-rice.jpg",
+  "curd rice (thayir sadam)": "/photos/curd-rice.jpg",
+  "bread pakora (4 pieces)": "/photos/bread-pakora.jpg",
+  "egg curry (6 eggs)": "/photos/egg-curry.jpg",
+  "fish fry (2 pieces)": "/photos/fish-fry.jpg",
+  "sooji halwa": "/photos/sooji-halwa.jpg",
+  "mixed fruit bowl": "/photos/mixed-fruit-bowl.jpg",
+  "pepper chicken dry": "/photos/pepper-chicken-dry.jpg",
+  "chicken clear soup": "/photos/chicken-clear-soup.jpg",
+  "egg dosa (2 pieces)": "/photos/egg-dosa.jpg",
+  "light fish curry": "/photos/light-fish-curry.jpg",
+  "prawn masala (dry)": "/photos/prawn-masala.jpg",
+  "grilled chicken salad bowl": "/photos/grilled-chicken-salad.jpg",
+};
+
 async function backfillImages(): Promise<void> {
   const { data: recipes, error } = await db
     .from("recipes")
@@ -270,6 +299,13 @@ async function backfillImages(): Promise<void> {
   let set = 0;
   let missed = 0;
   for (const r of recipes) {
+    const local = LOCAL_PHOTOS[r.title.toLowerCase()];
+    if (local) {
+      const { error: localErr } = await db.from("recipes").update({ image_url: local }).eq("id", r.id);
+      if (localErr) throw localErr;
+      set++;
+      continue;
+    }
     const article = WIKI_OVERRIDES[r.title.toLowerCase()];
     if (!article) {
       missed++;
