@@ -1,0 +1,59 @@
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { hasLoggedToday } from "@/app/(app)/progress/actions";
+
+/**
+ * Time-based weigh-in reminder: with the app open, fires a browser
+ * notification at the member's chosen time until the day is logged.
+ * Full background push (service worker + push subscription) lands in M6;
+ * this covers the consistent-daily-habit loop without any infra.
+ */
+export function WeighInReminder({ weighInTime }: { weighInTime: string | null }) {
+  const router = useRouter();
+  useEffect(() => {
+    if (!weighInTime || typeof window === "undefined" || !("Notification" in window)) return;
+
+    // Ask for permission once, only after the user opted in via a reminder time.
+    if (Notification.permission === "default" && !localStorage.getItem("weigh-asked")) {
+      localStorage.setItem("weigh-asked", "1");
+      void Notification.requestPermission();
+    }
+
+    const tick = async () => {
+      const now = new Date();
+      const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      if (hhmm < weighInTime) return;
+
+      // Cadence: at most 2 nudges per day, 4h apart, remembered across
+      // restarts (localStorage), and never on a day that's already logged.
+      const dayKey = `weigh-notify-${now.toISOString().slice(0, 10)}`;
+      const count = Number(localStorage.getItem(dayKey) ?? 0);
+      if (count >= 2) return;
+
+      if (await hasLoggedToday()) return;
+
+      const lastAt = Number(localStorage.getItem("weigh-notify-at") ?? 0);
+      if (count > 0 && Date.now() - lastAt < 4 * 60 * 60 * 1000) return;
+
+      localStorage.setItem(dayKey, String(count + 1));
+      localStorage.setItem("weigh-notify-at", String(Date.now()));
+      if (Notification.permission === "granted") {
+        const n = new Notification("Time to weigh in ⚖️", {
+          body: "Log today's weight — your targets follow your body.",
+        });
+        n.onclick = () => {
+          window.focus();
+          router.push("/progress");
+        };
+      }
+    };
+
+    void tick();
+    const id = setInterval(tick, 60_000);
+    return () => clearInterval(id);
+  }, [weighInTime, router]);
+
+  return null;
+}

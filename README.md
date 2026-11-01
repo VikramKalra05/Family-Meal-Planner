@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Family Meal Planner — AI Personal Nutrition Planner
 
-## Getting Started
+India-first family meal platform: per-member nutrition targets, hybrid weekly
+planning (shared dinners + personal meals), household pantry, aggregated
+shopping lists, recipe ingestion from reels via AI, craving re-optimization,
+and Kitchen Mode for cooks.
 
-First, run the development server:
+## Stack
+
+- **Next.js 16** (App Router, TypeScript, Tailwind 4, PWA)
+- **Supabase** — Postgres, Auth (Google OAuth + Phone OTP), Row Level Security
+- **Deterministic nutrition engine** (`src/lib/nutrition`) — Mifflin-St Jeor
+  BMR → TDEE → goal-adjusted targets with safety floors; unit-tested, zero AI
+- **BYO-key LLM layer** (M2) — any OpenAI-compatible provider (Z.ai GLM,
+  OpenAI, Gemini, Groq, Ollama) configured per user
+
+## Getting started
 
 ```bash
+npm install
+cp .env.example .env.local   # fill in Supabase URL + anon key
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+1. Create a project at [supabase.com](https://supabase.com).
+2. Apply the migrations in `supabase/migrations/` via the SQL editor or
+   `supabase db push`.
+3. Enable the **Google** provider and **Phone** auth in
+   Authentication → Providers.
+4. Put `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in
+   `.env.local`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Command         | What it does            |
+| --------------- | ----------------------- |
+| `npm run dev`   | Dev server (Turbopack)  |
+| `npm run build` | Production build        |
+| `npm run test`  | Vitest (engine + more)  |
+| `npm run lint`  | ESLint                  |
 
-## Learn More
+## Roadmap
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Milestone | Scope                                                                      | Status |
+| --------- | -------------------------------------------------------------------------- | ------ |
+| M0        | Scaffold, schema + RLS, auth, households/invites, profiles, nutrition engine | ✅ done |
+| M1        | Seed recipe pipeline, recipe CRUD, nutrition compute, pantry                 | ✅ done |
+| M2        | BYO-LLM settings + adapter, reel→recipe flow, AI nutrition estimation        | ✅ built (needs user's API key to run end-to-end) |
+| M3        | Hybrid weekly planner, ingredient aggregation, shopping list, WhatsApp share | ✅ done |
+| M4        | Intake logging (forms + AI chat), Today dashboard, craving re-optimization   | ✅ done |
+| M5        | Kitchen Mode, family suggestions/instructions feed                           | ✅ done |
+| M6        | Evaluation module (E1/E4), PWA (sw + share target), attribution, neobrutalist design | ✅ done |
