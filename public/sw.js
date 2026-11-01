@@ -33,3 +33,40 @@ self.addEventListener("fetch", (event) => {
       .catch(() => caches.match(req)),
   );
 });
+
+// Web Push — the server scheduler (src/lib/push-scheduler.ts) delivers
+// reminders even when every tab is closed.
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { title: "Family Meal Planner", body: event.data ? event.data.text() : "" };
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || "Family Meal Planner", {
+      body: data.body || "",
+      icon: "/icons/icon.svg",
+      badge: "/icons/icon.svg",
+      tag: data.tag || undefined,
+      data: { url: data.url || "/" },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || "/", self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.startsWith(self.location.origin) && "focus" in client) {
+          client.focus();
+          if ("navigate" in client) return client.navigate(url);
+          return;
+        }
+      }
+      return self.clients.openWindow(url);
+    }),
+  );
+});

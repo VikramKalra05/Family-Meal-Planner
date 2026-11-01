@@ -3,12 +3,24 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { hasLoggedToday } from "@/app/(app)/progress/actions";
+import { ensurePushSubscription } from "@/lib/push-client";
+
+// One subscribe attempt per page load; the POST is an idempotent upsert.
+let pushSubscribed = false;
+async function registerPushOnce(): Promise<void> {
+  if (pushSubscribed) return;
+  pushSubscribed = true;
+  await ensurePushSubscription();
+}
 
 /**
- * Time-based weigh-in reminder: with the app open, fires a browser
- * notification at the member's chosen time until the day is logged.
- * Full background push (service worker + push subscription) lands in M6;
- * this covers the consistent-daily-habit loop without any infra.
+ * Weigh-in reminders, two layers:
+ *  - In-app (this component): fires a browser notification while a tab is open.
+ *  - Background: once permission is granted this device's push subscription is
+ *    registered server-side and src/lib/push-scheduler.ts delivers the same
+ *    reminder even with the app closed.
+ * Cadence in both layers: only after the chosen time, max 2/day, 4h apart,
+ * never on a day that's already logged.
  */
 export function WeighInReminder({ weighInTime }: { weighInTime: string | null }) {
   const router = useRouter();
@@ -18,8 +30,11 @@ export function WeighInReminder({ weighInTime }: { weighInTime: string | null })
     // Ask for permission once, only after the user opted in via a reminder time.
     if (Notification.permission === "default" && !localStorage.getItem("weigh-asked")) {
       localStorage.setItem("weigh-asked", "1");
-      void Notification.requestPermission();
+      void Notification.requestPermission().then((permission) => {
+        if (permission === "granted") registerPushOnce().catch(() => {});
+      });
     }
+    if (Notification.permission === "granted") registerPushOnce().catch(() => {});
 
     const tick = async () => {
       const now = new Date();

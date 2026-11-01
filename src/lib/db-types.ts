@@ -95,3 +95,22 @@ export interface WeightLog {
   source: "manual" | "reminder";
   created_at: string;
 }
+
+export interface PushSubscription {
+  id: string;
+  member_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  user_agent: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PushLog {
+  id: string;
+  member_id: string;
+  kind: string;
+  day: string;
+  sent_at: string;
+}

@@ -50,3 +50,23 @@ npm run dev
 | M4        | Intake logging (forms + AI chat), Today dashboard, craving re-optimization   | ✅ done |
 | M5        | Kitchen Mode, family suggestions/instructions feed                           | ✅ done |
 | M6        | Evaluation module (E1/E4), PWA (sw + share target), attribution, neobrutalist design | ✅ done |
+| M7        | Background web push (weigh-in reminders with the app closed, VAPID + server scheduler) | ✅ done |
+
+## Background push notifications
+
+Weigh-in reminders work in two layers:
+
+1. **In-app** — while a tab is open, `WeighInReminder` fires browser
+   notifications on the member's schedule.
+2. **Background** — once notification permission is granted, the device's
+   push subscription is stored (`push_subscriptions`) and the scheduler in
+   `src/lib/push-scheduler.ts` (started via `src/instrumentation.ts` when the
+   server boots) delivers the same reminder through Web Push — even when the
+   app is closed. Cadence in both layers: only after the chosen time, max
+   2/day, 4h apart, never on an already-logged day. All clock math is IST.
+
+Required env (already in `.env.local` locally): `NEXT_PUBLIC_VAPID_PUBLIC_KEY`
++ `VAPID_PRIVATE_KEY` (generate with `npx web-push generate-vapid-keys`),
+plus `SUPABASE_SERVICE_ROLE_KEY` for the scheduler. Reminder cadence logic is
+pure and unit-tested in `src/lib/push.ts`. Test any device with the
+"🔔 Test push" button on the Today dashboard.

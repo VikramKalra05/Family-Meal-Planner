@@ -4,6 +4,7 @@ import { requireFullProfile } from "@/lib/profile";
 import { QuickLogForm } from "./progress/weight-forms";
 import { AiLogForm, CravingForm } from "./today-forms";
 import { setEntryStatusAction } from "./week/actions";
+import { PushTestButton } from "./push-test-button";
 import { mondayOf } from "@/lib/planner";
 
 export const instant = false;
@@ -252,7 +253,12 @@ function WeighInSection({
                 : "First weigh-in? Log it — the tracker and targets build from here."}
           </p>
         </div>
-        {!loggedToday && <QuickLogForm compact />}
+        {!loggedToday && (
+          <div className="flex items-center gap-3">
+            <PushTestButton />
+            <QuickLogForm compact />
+          </div>
+        )}
         {loggedToday && (
           <Link
             href="/progress"
