@@ -17,11 +17,13 @@ export function ReelFlow({ initialUrl = "" }: { initialUrl?: string }) {
   const [draft, setDraft] = useState<DraftRecipe | null>(null);
   const [sourceUrl, setSourceUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [needsCaption, setNeedsCaption] = useState(false);
   const [drafting, startDrafting] = useTransition();
   const [saving, startSaving] = useTransition();
 
   function runDraft() {
     setError(null);
+    setNeedsCaption(false);
     startDrafting(async () => {
       const res: DraftResult = await draftRecipeFromUrl({ url, caption });
       if (res.ok) {
@@ -29,7 +31,10 @@ export function ReelFlow({ initialUrl = "" }: { initialUrl?: string }) {
         setSourceUrl(url);
       } else {
         setError(res.error);
-        if (res.needsCaption) setShowCaption(true);
+        if (res.needsCaption) {
+          setNeedsCaption(true);
+          setShowCaption(true);
+        }
       }
     });
   }
@@ -79,13 +84,20 @@ export function ReelFlow({ initialUrl = "" }: { initialUrl?: string }) {
           </button>
         )}
 
+        {needsCaption && (
+          <div className="border-2 border-neutral-900 bg-amber-100 px-4 py-3 text-xs font-medium text-neutral-900 shadow-[2px_2px_0_#111]">
+            No usable recipe text came back from the link. Paste the reel&apos;s caption (or just the
+            ingredients + steps) into the box below, then draft again — the AI builds from that instead.
+          </div>
+        )}
+
         {error && <p className="rounded-none bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{error}</p>}
 
         <button
           type="button" onClick={runDraft} disabled={drafting || !url.trim()}
           className="w-full rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide disabled:opacity-50"
         >
-          {drafting ? "Reading the recipe…" : "✨ Draft recipe with AI"}
+          {drafting ? (needsCaption ? "Drafting from your text…" : "Reading the recipe…") : "✨ Draft recipe with AI"}
         </button>
       </div>
     );

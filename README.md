@@ -52,6 +52,28 @@ npm run dev
 | M6        | Evaluation module (E1/E4), PWA (sw + share target), attribution, neobrutalist design | ✅ done |
 | M7        | Background web push (weigh-in reminders with the app closed, VAPID + server scheduler) | ✅ done |
 
+## Deploying to Vercel
+
+1. Import the GitHub repo in Vercel (framework auto-detects Next.js).
+2. Add these environment variables (Project → Settings → Environment Variables):
+
+   | Variable | Source |
+   | --- | --- |
+   | `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Project Settings → API |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API (anon, public by design) |
+   | `API_KEY_ENCRYPTION_KEY` | 32-byte hex — same value as local `.env.local` (decrypts stored provider keys) |
+   | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Same as local (public key, inlined client-side) |
+   | `VAPID_PRIVATE_KEY` | Same as local (server-only) |
+   | `SUPABASE_SERVICE_ROLE_KEY` | Server-only — needed by the push cron tick |
+   | `CRON_SECRET` | Any long random string — protects `/api/push/tick` (Vercel sends it as a bearer token) |
+
+3. Deploy, then in **Supabase → Authentication → URL Configuration** set the Site URL to the
+   Vercel URL (e.g. `https://family-meal-planner.vercel.app`) and add it to the Redirect URLs
+   list — otherwise Google OAuth login redirects back to localhost.
+4. Push notifications on Vercel run through **Vercel Cron** (`vercel.json`: daily 09:00 IST nudge
+   via `/api/push/tick`, bearer-protected by `CRON_SECRET`). The free Hobby plan allows only
+   once-daily crons — for the full 60s cadence run the app from a long-lived host instead.
+
 ## Background push notifications
 
 Weigh-in reminders work in two layers:

@@ -43,7 +43,7 @@ Respond with ONLY a JSON object, no prose, shaped exactly like:
   "ingredients": [{"name": "lowercase english ingredient name", "grams": number (raw weight in grams for the WHOLE recipe; liquids may be given in ml-as-grams), "note": string|null (e.g. "for tempering", "frying oil, absorbed")}],
   "steps": [string, …]
 }
-Rules: scale ingredients to the stated servings; use common Indian ingredient naming (e.g. "atta (whole wheat flour)", "toor dal (split pigeon pea)", "paneer", "curd (dahi)"); include salt, oil/ghee and spices with realistic gram amounts; 4-10 steps written as instructions.`;
+Rules: base the recipe ONLY on the provided page title, description and caption — NEVER invent or "fill in" a recipe that the text does not describe. If the provided text does not clearly identify one specific dish (no usable dish name, ingredients, or cooking method), respond with exactly {"cannot_extract": true} and nothing else. Otherwise: scale ingredients to the stated servings; use common Indian ingredient naming (e.g. "atta (whole wheat flour)", "toor dal (split pigeon pea)", "paneer", "curd (dahi)"); include salt, oil/ghee and spices with realistic gram amounts; 4-10 steps written as instructions.`;
 
 const ESTIMATE_SYSTEM = `You are a nutrition-data assistant using Indian (IFCT) and USDA food composition knowledge.
 Given an ingredient name (and optional context), estimate its macronutrients PER 100 GRAMS of the edible raw portion.
@@ -120,4 +120,79 @@ export async function fetchPageMeta(
   } catch {
     return null;
   }
+}
+
+const UA_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36",
+  Accept: "text/html",
+};
+
+/**
+ * Instagram-specific fallback: the /embed/captioned/ endpoint often returns
+ * the full post caption even when the main page is a login wall. Only ever
+ * called with https Instagram URLs (the action validates them first).
+ */
+export async function fetchInstagramCaption(url: string): Promise<string | null> {
+  if (!/^(https?:\/\/)?(www\.)?instagram\.com\//i.test(url)) return null;
+  const shortcode = url.match(/instagram\.com\/(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/i)?.[1];
+  if (!shortcode) return null;
+  const embedUrl = `https://www.instagram.com/p/${shortcode}/embed/captioned/`;
+  if (!isSafePublicUrl(embedUrl)) return null;
+  try {
+    const res = await fetch(embedUrl, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(8000),
+      headers: UA_HEADERS,
+    });
+    if (!res.ok) return null;
+    const html = (await res.text()).slice(0, 300_000);
+    const capMatch = html.match(/<div class="Caption"[^>]*>([\s\S]*?)<\/div>/);
+    const raw = capMatch?.[1] ?? pickMetaDescription(html);
+    if (!raw) return null;
+    const text = raw
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&quot;/g, '"')
+      .replace(/&#0?39;/g, "'")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .trim();
+    // The embed caption block ends with UI strings like "View on Instagram" —
+    // those add noise for the model, so cut them off.
+    const cleaned = text.split(/\n\s*(?:View on Instagram|Comments|Share|Log in)/i)[0].trim();
+    return cleaned.length > 0 ? cleaned.slice(0, 4000) : null;
+  } catch {
+    return null;
+  }
+}
+
+function pickMetaDescription(html: string): string | null {
+  const m =
+    html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i) ??
+    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']/i);
+  return m?.[1] ?? null;
+}
+
+// Login-wall/boilerplate values that carry no recipe information.
+const GENERIC_META = /^(instagram|login ?[•-] ?instagram|create an? account|see instagram photos and videos[^\n]*|x+|\d+ likes?,? ?\d* ?comments?.*)$/i;
+
+/**
+ * Decides whether the gathered post content is substantial enough to ask the
+ * LLM for a recipe. The whole point: never let the model hallucinate a dish
+ * from a bare URL — with no usable text we refuse and ask for the caption.
+ */
+export function postHasRecipeContent(
+  meta: { title?: string; description?: string } | null,
+  caption?: string | null,
+): boolean {
+  if (caption?.trim() && caption.trim().length >= 20) return true;
+  const text = [meta?.title, meta?.description]
+    .filter((s): s is string => Boolean(s && s.trim()))
+    .join(" ")
+    .trim();
+  if (!text) return false;
+  const stripped = text.replace(GENERIC_META, "").trim();
+  return stripped.length >= 40;
 }

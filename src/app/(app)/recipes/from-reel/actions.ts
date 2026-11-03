@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   ProviderNotConfiguredError,
   ProviderError,
+  ProviderRejectedError,
   chatJson,
   resolveProvider,
 } from "@/lib/ai/provider";
@@ -13,7 +14,9 @@ import {
   draftRecipeSchema,
   estimateMessages,
   estimatedIngredientSchema,
+  fetchInstagramCaption,
   fetchPageMeta,
+  postHasRecipeContent,
   reelExtractionMessages,
   type DraftRecipe,
 } from "@/lib/ai/recipes";
@@ -43,13 +46,21 @@ export async function draftRecipeFromUrl(input: {
   const urlCheck = z.string().url().safeParse(input.url);
   if (!urlCheck.success) return { ok: false, error: "Paste a valid URL (Instagram reel, YouTube short, blog post…)" };
 
+  // Gather everything the post will give us: og/meta, then the Instagram
+  // embed-caption fallback (works even when the main page is a login wall),
+  // plus whatever the user pasted manually.
   const meta = await fetchPageMeta(input.url);
-  if (!meta && !input.caption?.trim()) {
+  const embedded = await fetchInstagramCaption(input.url);
+  const caption = input.caption?.trim() ? input.caption.trim() : embedded;
+
+  // Hard honesty gate: with no real recipe text in hand we REFUSE instead of
+  // letting the model hallucinate a plausible-looking dish from a bare URL.
+  if (!postHasRecipeContent(meta, caption)) {
     return {
       ok: false,
-      error:
-        "The link could not be read (Instagram usually blocks automated access). Paste the caption or the ingredients/steps text and try again.",
       needsCaption: true,
+      error:
+        "Couldn't read this reel's content (Instagram blocks automated access most of the time, and no caption came through). The AI will NOT guess a recipe — paste the caption or the ingredients/steps below and draft again.",
     };
   }
 
@@ -57,10 +68,22 @@ export async function draftRecipeFromUrl(input: {
     const draft = await chatJson(provider, draftRecipeSchema, reelExtractionMessages({
       url: input.url,
       pageMeta: meta,
-      caption: input.caption ?? null,
-    }), { maxTokens: 2500, temperature: 0.2 });
+      caption,
+    }), {
+      maxTokens: 2500,
+      temperature: 0.2,
+      rejectIf: (d) => Boolean(d && typeof d === "object" && ("cannot_extract" in d || (d as { error?: unknown }).error === "no_recipe_content")),
+    });
     return { ok: true, draft };
   } catch (e) {
+    if (e instanceof ProviderRejectedError) {
+      return {
+        ok: false,
+        needsCaption: true,
+        error:
+          "The post text doesn't describe a recipe clearly enough (the AI correctly refused to guess). Paste the caption or the ingredient list below and draft again.",
+      };
+    }
     if (e instanceof ProviderNotConfiguredError || e instanceof ProviderError) {
       return { ok: false, error: e.message };
     }

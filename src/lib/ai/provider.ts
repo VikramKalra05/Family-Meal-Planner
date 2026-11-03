@@ -169,16 +169,43 @@ export function parseJsonLoose(raw: string): unknown {
   }
 }
 
+/** Thrown when the completion matches `rejectIf` — an honest refusal (e.g. the model says it can't extract a recipe). */
+export class ProviderRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
 /** chatComplete + loose JSON parse in one step. */
 export async function chatJson<T>(
   provider: ResolvedProvider,
   schema: z.ZodType<T>,
   messages: ChatMessage[],
-  opts: { maxTokens?: number; temperature?: number } = {},
+  opts: {
+    maxTokens?: number;
+    temperature?: number;
+    /** If the parsed JSON matches, throw ProviderRejectedError instead of coercing it into the schema. */
+    rejectIf?: (data: unknown) => boolean;
+    rejectMessage?: string;
+  } = {},
 ): Promise<T> {
   const raw = await chatComplete(provider, messages, { json: true, ...opts });
   const parsed = schema.safeParse(parseJsonLoose(raw));
-  if (parsed.success) return parsed.data;
+  if (parsed.success) {
+    if (opts.rejectIf?.(parsed.data)) throw new ProviderRejectedError(opts.rejectMessage ?? "Rejected");
+    return parsed.data;
+  }
+
+  // The model may have answered with a deliberate refusal object rather than
+  // the schema — check BEFORE asking it to "fix" the shape, which would push
+  // it into inventing content.
+  try {
+    const loose = parseJsonLoose(raw);
+    if (opts.rejectIf?.(loose)) throw new ProviderRejectedError(opts.rejectMessage ?? "Rejected");
+  } catch (e) {
+    if (e instanceof ProviderRejectedError) throw e;
+    // not JSON at all — fall through to the corrective retry below
+  }
 
   // One retry with the validation error fed back — cheap and usually enough.
   const retryRaw = await chatComplete(
@@ -196,7 +223,9 @@ export async function chatJson<T>(
     ],
     { json: true, ...opts },
   );
-  const retry = schema.safeParse(parseJsonLoose(retryRaw));
+  const retryParsed = parseJsonLoose(retryRaw);
+  if (opts.rejectIf?.(retryParsed)) throw new ProviderRejectedError(opts.rejectMessage ?? "Rejected");
+  const retry = schema.safeParse(retryParsed);
   if (retry.success) return retry.data;
   throw new ProviderError("The AI kept returning malformed data — try a different model in Settings.");
 }
@@ -208,30 +237,42 @@ export async function testProviderCreds(
   model: string,
 ): Promise<{ ok: true; latencyMs: number } | { ok: false; error: string }> {
   const started = Date.now();
-  try {
-    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+  const endpoint = `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  const TIMEOUT_MS = 30_000;
+
+  // Slow/garbage errors that a single fresh attempt often clears (cold-start
+  // gateways, sleepy serverless endpoints) — retry once before giving up.
+  const slow = (err: Error) => err.name === "AbortError" || err.name === "TimeoutError";
+
+  async function attempt(body: Record<string, unknown>): Promise<Response> {
+    return fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: "Reply with the single word: ok" }],
-        max_tokens: 16,
-      }),
-      signal: AbortSignal.timeout(20_000),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
+  }
+
+  try {
+    let res: Response;
+    try {
+      res = await attempt({ model, messages: [{ role: "user", content: "Reply with the single word: ok" }], max_tokens: 16 });
+    } catch (err) {
+      if (!slow(err as Error)) throw err;
+      res = await attempt({ model, messages: [{ role: "user", content: "Reply with the single word: ok" }], max_tokens: 16 });
+    }
+
     if (!res.ok) {
       const body = (await res.text().catch(() => "")).replaceAll(apiKey, "•••");
       // Reasoning models reject max_tokens (they use max_completion_tokens) —
       // retry once without any token cap before declaring the provider broken.
       if (res.status === 400 && body.includes("max_tokens")) {
-        const retry = await fetch(`${baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({ model, messages: [{ role: "user", content: "ok" }] }),
-          signal: AbortSignal.timeout(20_000),
-        });
+        const retry = await attempt({ model, messages: [{ role: "user", content: "ok" }] });
         if (retry.ok) return { ok: true, latencyMs: Date.now() - started };
         return { ok: false, error: `HTTP ${retry.status} — model rejected the test call` };
+      }
+      if (res.status === 404) {
+        return { ok: false, error: `HTTP 404 — the model id "${model}" was not found on this endpoint. ${body.slice(0, 140)}` };
       }
       return { ok: false, error: `HTTP ${res.status}${body ? ` — ${body.slice(0, 160)}` : ""}` };
     }
@@ -239,6 +280,13 @@ export async function testProviderCreds(
     if (!data.choices?.length) return { ok: false, error: "Unexpected response shape" };
     return { ok: true, latencyMs: Date.now() - started };
   } catch (e) {
-    return { ok: false, error: (e as Error).message };
+    const err = e as Error;
+    if (err.name === "AbortError" || err.name === "TimeoutError") {
+      return {
+        ok: false,
+        error: `No response within ${TIMEOUT_MS / 1000}s (tried twice). The endpoint may be slow or the model id may be wrong — try again, and double-check the model in Settings.`,
+      };
+    }
+    return { ok: false, error: err.message };
   }
 }
