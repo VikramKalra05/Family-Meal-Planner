@@ -169,11 +169,19 @@ export default async function SettingsPage() {
       </section>
 
       <section className="rounded-none bg-white border-2 border-neutral-900 shadow-[4px_4px_0_#111]">
-        <header className="border-b-2 border-neutral-900 bg-yellow-300 px-6 py-4">
-          <h2 className="text-sm font-semibold text-neutral-900">AI providers</h2>
-          <p className="text-xs text-neutral-500">
-            Bring your own key — any OpenAI-compatible endpoint. Powers reel→recipe drafts and nutrition estimation.
-          </p>
+        <header className="flex flex-wrap items-start justify-between gap-3 border-b-2 border-neutral-900 bg-yellow-300 px-6 py-4">
+          <div>
+            <h2 className="text-sm font-semibold text-neutral-900">AI providers</h2>
+            <p className="text-xs text-neutral-500">
+              Bring your own key — any OpenAI-compatible endpoint. Powers reel→recipe drafts and nutrition estimation.
+            </p>
+          </div>
+          <Link
+            href="/settings/usage"
+            className="rounded-none border-2 border-neutral-900 bg-white px-3 py-2 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+          >
+            📊 AI usage
+          </Link>
         </header>
         <div className="divide-y divide-neutral-100">
           {rows.map((p) => (
@@ -191,7 +199,13 @@ export default async function SettingsPage() {
                   {p.model} · {p.base_url}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href={`/settings/providers/${p.id}`}
+                  className="rounded-none border-2 border-neutral-900 px-3 py-1.5 text-xs font-medium hover:bg-amber-50"
+                >
+                  Edit
+                </Link>
                 <TestSavedButton id={p.id} />
                 {!p.is_default && (
                   <form action={setDefaultAiProvider}>

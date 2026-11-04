@@ -112,7 +112,7 @@ export async function estimateIngredientAction(
       provider,
       estimatedIngredientSchema,
       estimateMessages({ name }),
-      { maxTokens: 400, temperature: 0.2 },
+      { maxTokens: 400, temperature: 0.2, feature: "ingredient_estimate" },
     );
     return {
       kcal: est.kcal_per_100g,

@@ -74,6 +74,21 @@ npm run dev
    via `/api/push/tick`, bearer-protected by `CRON_SECRET`). The free Hobby plan allows only
    once-daily crons — for the full 60s cadence run the app from a long-lived host instead.
 
+## AI usage & cost
+
+Every AI call made through the BYO-key layer — AI meal logging, reel→recipe
+drafts, ingredient macro estimates and provider connection tests — is recorded
+in `ai_usage_events` with prompt/completion/reasoning tokens, the provider and
+model, and an estimated USD cost. Open **Settings → AI usage** to see totals,
+per-provider and per-feature breakdowns, and the latest calls. Providers can be
+edited in place (label, endpoint, model, or a rotated key) from
+**Settings → AI providers → Edit**.
+
+Apply `supabase/migrations/0009_ai_usage.sql` once in the Supabase SQL editor to
+create the ledger. Costs are estimates from public list prices; OpenRouter's
+reported cost and local/free endpoints are used as-is, and unknown models show
+“—” rather than a guessed number.
+
 ## Background push notifications
 
 Weigh-in reminders work in two layers:

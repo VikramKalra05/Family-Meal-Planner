@@ -75,6 +75,7 @@ export async function draftRecipeFromUrl(input: {
     }), {
       maxTokens: 2500,
       temperature: 0.2,
+      feature: "reel_draft",
       rejectIf: (d) => Boolean(d && typeof d === "object" && ("cannot_extract" in d || (d as { error?: unknown }).error === "no_recipe_content")),
     });
     return { ok: true, draft };
@@ -142,7 +143,7 @@ export async function importDraftRecipe(draftInput: DraftRecipe & { source_url?:
           provider,
           estimatedIngredientSchema,
           estimateMessages({ name }),
-          { maxTokens: 400 },
+          { maxTokens: 400, feature: "ingredient_estimate" },
         );
         return { name, est };
       }),

@@ -2,8 +2,14 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/profile";
 import { decryptSecret } from "@/lib/crypto";
+import { normalizeUsage } from "./tokens";
+import { recordAiUsage } from "./usage-store";
 
 export interface ResolvedProvider {
+  /** ai_providers.id; null for the env demo provider. */
+  id: string | null;
+  /** Owner of the provider row (and of the usage ledger rows). */
+  userId: string | null;
   label: string;
   baseUrl: string;
   apiKey: string;
@@ -40,6 +46,8 @@ export async function resolveProvider(): Promise<ResolvedProvider | null> {
       const row = parsed.data[0];
       try {
         return {
+          id: row.id,
+          userId: user.id,
           label: row.label,
           baseUrl: row.base_url.replace(/\/+$/, ""),
           apiKey: decryptSecret(row.api_key_encrypted),
@@ -56,7 +64,15 @@ export async function resolveProvider(): Promise<ResolvedProvider | null> {
   const demoKey = process.env.DEMO_LLM_API_KEY;
   const demoModel = process.env.DEMO_LLM_MODEL;
   if (demoUrl && demoKey && demoModel) {
-    return { label: "Demo provider", baseUrl: demoUrl.replace(/\/+$/, ""), apiKey: demoKey, model: demoModel, source: "env-demo" };
+    return {
+      id: null,
+      userId: user?.id ?? null,
+      label: "Demo provider",
+      baseUrl: demoUrl.replace(/\/+$/, ""),
+      apiKey: demoKey,
+      model: demoModel,
+      source: "env-demo",
+    };
   }
   return null;
 }
@@ -87,7 +103,7 @@ export class ProviderError extends Error {
 export async function chatComplete(
   provider: ResolvedProvider,
   messages: ChatMessage[],
-  opts: { json?: boolean; maxTokens?: number; temperature?: number } = {},
+  opts: { json?: boolean; maxTokens?: number; temperature?: number; feature?: string } = {},
 ): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
@@ -127,6 +143,7 @@ export async function chatComplete(
 
     const data = (await res.json()) as {
       choices?: { message?: { content?: string | { text?: string }[] } }[];
+      usage?: unknown;
     };
     const raw = data.choices?.[0]?.message?.content;
     // Some gateways return content as an array of parts — normalize to text.
@@ -137,6 +154,22 @@ export async function chatComplete(
           ? raw.map((part) => part?.text ?? "").join("")
           : undefined;
     if (!content) throw new ProviderError("Provider returned an empty completion.");
+
+    // Every feature call lands in the usage ledger; a failed insert is logged
+    // but never breaks the model response.
+    await recordAiUsage(
+      {
+        userId: provider.userId,
+        providerId: provider.id,
+        providerLabel: provider.label,
+        model: provider.model,
+        feature: opts.feature ?? "chat",
+        baseUrl: provider.baseUrl,
+        free: provider.source === "env-demo",
+      },
+      normalizeUsage(data.usage, messages, content),
+    );
+
     return content;
   } catch (e) {
     if (e instanceof ProviderError) throw e;
@@ -183,6 +216,8 @@ export async function chatJson<T>(
   opts: {
     maxTokens?: number;
     temperature?: number;
+    /** Ledger label, e.g. "meal_log" or "reel_draft". */
+    feature?: string;
     /** If the parsed JSON matches, throw ProviderRejectedError instead of coercing it into the schema. */
     rejectIf?: (data: unknown) => boolean;
     rejectMessage?: string;
@@ -234,6 +269,12 @@ export async function testProviderCreds(
   baseUrl: string,
   apiKey: string,
   model: string,
+  usageCtx?: {
+    userId: string | null;
+    providerId: string | null;
+    providerLabel: string;
+    feature?: string;
+  },
 ): Promise<{ ok: true; latencyMs: number } | { ok: false; error: string }> {
   const started = Date.now();
   const endpoint = `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
@@ -275,8 +316,21 @@ export async function testProviderCreds(
       }
       return { ok: false, error: `HTTP ${res.status}${body ? ` — ${body.slice(0, 160)}` : ""}` };
     }
-    const data = (await res.json()) as { choices?: unknown[] };
+    const data = (await res.json()) as { choices?: unknown[]; usage?: unknown };
     if (!data.choices?.length) return { ok: false, error: "Unexpected response shape" };
+    if (usageCtx) {
+      await recordAiUsage(
+        {
+          userId: usageCtx.userId,
+          providerId: usageCtx.providerId,
+          providerLabel: usageCtx.providerLabel,
+          model,
+          feature: usageCtx.feature ?? "provider_test",
+          baseUrl,
+        },
+        normalizeUsage(data.usage, [{ content: "ok" }], "ok"),
+      );
+    }
     return { ok: true, latencyMs: Date.now() - started };
   } catch (e) {
     const err = e as Error;

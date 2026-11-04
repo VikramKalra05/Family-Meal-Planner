@@ -114,3 +114,19 @@ export interface PushLog {
   day: string;
   sent_at: string;
 }
+
+export interface AiUsageEvent {
+  id: string;
+  user_id: string;
+  provider_id: string | null;
+  provider_label: string;
+  model: string;
+  feature: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  reasoning_tokens: number | null;
+  total_tokens: number;
+  estimated: boolean;
+  cost_usd: number | null;
+  created_at: string;
+}

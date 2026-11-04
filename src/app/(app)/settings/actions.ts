@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { encryptSecret, decryptSecret } from "@/lib/crypto";
 import { testProviderCreds } from "@/lib/ai/provider";
@@ -47,8 +48,60 @@ export async function addAiProvider(
   return { error: null, ok: `${parsed.data.label} added` };
 }
 
-export async function setDefaultAiProvider(formData: FormData): Promise<void> {
+const updateProviderSchema = providerFormSchema.extend({
+  id: z.string().uuid(),
+  api_key: z
+    .string()
+    .trim()
+    .max(300)
+    .optional()
+    .refine((v) => !v || v.length >= 8, "API key looks too short"),
+});
+
+/** Edit label/endpoint/model (and optionally rotate the key) in place. */
+export async function updateAiProvider(
+  _prev: ProviderActionState,
+  formData: FormData,
+): Promise<ProviderActionState> {
   const user = await getUser();
+  if (!user) return { error: "Not signed in", ok: null };
+
+  const parsed = updateProviderSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input", ok: null };
+  const v = parsed.data;
+
+  const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("ai_providers")
+    .select("id")
+    .eq("id", v.id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!existing) return { error: "Provider not found", ok: null };
+
+  const { error } = await supabase
+    .from("ai_providers")
+    .update({
+      label: v.label,
+      base_url: v.base_url.replace(/\/+$/, ""),
+      model: v.model,
+      ...(v.api_key ? { api_key_encrypted: encryptSecret(v.api_key) } : {}),
+    })
+    .eq("id", v.id)
+    .eq("user_id", user.id);
+  if (error) {
+    const message = error.message.includes("duplicate")
+      ? "That label is already used by another provider."
+      : error.message;
+    return { error: message, ok: null };
+  }
+
+  revalidatePath("/settings");
+  revalidatePath(`/settings/providers/${v.id}`);
+  redirect("/settings");
+}
+
+export async function setDefaultAiProvider(formData: FormData): Promise<void> {  const user = await getUser();
   const id = z.string().uuid().safeParse(formData.get("id"));
   if (!user || !id.success) return;
 
@@ -79,16 +132,60 @@ export async function testSavedProvider(
   const supabase = await createClient();
   const { data: row } = await supabase
     .from("ai_providers")
-    .select("base_url, api_key_encrypted, model")
+    .select("label, base_url, api_key_encrypted, model")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
   if (!row) return { ok: false, error: "Provider not found" };
 
   try {
-    return await testProviderCreds(row.base_url, decryptSecret(row.api_key_encrypted), row.model);
+    return await testProviderCreds(row.base_url, decryptSecret(row.api_key_encrypted), row.model, {
+      userId: user.id,
+      providerId: id,
+      providerLabel: row.label,
+    });
   } catch {
     return { ok: false, error: "Could not decrypt the stored key — re-add the provider." };
+  }
+}
+
+/** Live check with the values currently in the edit form (blank key = stored key). */
+export async function testProviderUpdate(
+  id: string,
+  base_url: string,
+  model: string,
+  api_key?: string,
+): Promise<{ ok: true; latencyMs: number } | { ok: false; error: string }> {
+  const user = await getUser();
+  if (!user) return { ok: false, error: "Not signed in" };
+  if (!checkRate(`test:${user.id}`, 20, 60 * 60 * 1000)) {
+    return { ok: false, error: rateLimited(20, 60 * 60 * 1000) };
+  }
+
+  const parsedId = z.string().uuid().safeParse(id);
+  const url = z.string().trim().url().safeParse(base_url);
+  if (!parsedId.success || !url.success || !model.trim()) {
+    return { ok: false, error: "Fill base URL and model first" };
+  }
+
+  const supabase = await createClient();
+  const { data: row } = await supabase
+    .from("ai_providers")
+    .select("label, api_key_encrypted")
+    .eq("id", parsedId.data)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!row) return { ok: false, error: "Provider not found" };
+
+  try {
+    const key = api_key?.trim() ? api_key.trim() : decryptSecret(row.api_key_encrypted);
+    return await testProviderCreds(url.data.replace(/\/+$/, ""), key, model.trim(), {
+      userId: user.id,
+      providerId: parsedId.data,
+      providerLabel: row.label,
+    });
+  } catch {
+    return { ok: false, error: "Could not decrypt the stored key — enter a new key." };
   }
 }
 
@@ -105,5 +202,9 @@ export async function testRawProvider(
   if (!url.success || api_key.length < 8 || !model.trim()) {
     return { ok: false, error: "Fill base URL, API key and model first" };
   }
-  return testProviderCreds(url.data, api_key, model.trim());
+  return testProviderCreds(url.data, api_key, model.trim(), {
+    userId: user.id,
+    providerId: null,
+    providerLabel: "Unsaved provider",
+  });
 }
