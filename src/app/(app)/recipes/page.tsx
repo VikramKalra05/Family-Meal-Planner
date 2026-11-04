@@ -8,6 +8,7 @@ export const instant = false;
 interface Row extends Recipe {
   recipe_nutrition: RecipeNutrition | null;
   recipe_media: { id: string; kind: "image" | "video"; url: string; label: string | null }[] | null;
+  recipe_items: { quantity_g: number | null }[] | null;
 }
 
 export default async function RecipesPage() {
@@ -15,7 +16,7 @@ export default async function RecipesPage() {
 
   const { data: recipes, error } = await supabase
     .from("recipes")
-    .select("*, recipe_nutrition(kcal, protein_g, carbs_g, fat_g, fiber_g), recipe_media(id, kind, url, label)")
+    .select("*, recipe_nutrition(kcal, protein_g, carbs_g, fat_g, fiber_g), recipe_media(id, kind, url, label), recipe_items(quantity_g)")
     .order("title");
 
   // Fail loudly — a silent empty grid looks like data loss.
@@ -39,18 +40,18 @@ export default async function RecipesPage() {
   }
 
   // Raw-weight totals for the "~Xg per serving" line on cards.
-  const { data: itemRows } = await supabase.from("recipe_items").select("recipe_id, quantity_g");
-  const totalByRecipe = new Map<string, number>();
-  for (const row of itemRows ?? []) {
-    totalByRecipe.set(row.recipe_id, (totalByRecipe.get(row.recipe_id) ?? 0) + Number(row.quantity_g ?? 0));
-  }
-
-  // Card data is filtered live on the client — no submit button needed.
-  const rows: RecipeCardData[] = ((recipes ?? []) as Row[]).map((r) => ({
-    ...r,
-    media: r.recipe_media ?? [],
-    gramsPerServing: Math.round((totalByRecipe.get(r.id) ?? 0) / Math.max(1, r.servings)),
-  }));
+  // Embedded in the same query — this used to be a second full table scan.
+  const rows: RecipeCardData[] = ((recipes ?? []) as Row[]).map((r) => {
+    const totalGrams = (r.recipe_items ?? []).reduce(
+      (sum, item) => sum + Number(item.quantity_g ?? 0),
+      0,
+    );
+    return {
+      ...r,
+      media: r.recipe_media ?? [],
+      gramsPerServing: Math.round(totalGrams / Math.max(1, r.servings)),
+    };
+  });
 
   return (
     <div className="space-y-5">

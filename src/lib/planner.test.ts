@@ -69,9 +69,9 @@ describe("portionFor", () => {
     expect(portionFor(recipe("x", "Dish", { kcal: 743 }), m, "snack")).toBe(0.5);
   });
 
-  it("clamps portions to 0.25–2", () => {
+  it("clamps portions to 0.25–3", () => {
     const m = member("m", { targets: { ...member("m").targets, kcal: 2980 } });
-    expect(portionFor(recipe("x", "Tiny", { kcal: 100 }), m, "snack")).toBe(2); // 2.98 clamped
+    expect(portionFor(recipe("x", "Tiny", { kcal: 100 }), m, "snack")).toBe(3); // 2.98 → rounded to 3
     expect(portionFor(recipe("x", "Huge", { kcal: 2000 }), m, "snack")).toBe(0.25); // 0.149 clamped
   });
 });
@@ -148,6 +148,49 @@ describe("generateWeek", () => {
         2,
       );
     }
+  });
+
+  it("keeps realistic days within 10% of a high calorie target", () => {
+    // Real catalogue spread (kcal per serving): light sides through dense mains.
+    const realisticKcal = [
+      50, 88, 95, 123, 139, 153, 171, 183, 187, 189, 190, 200, 207, 215, 218, 222, 224, 231,
+      244, 247, 251, 252, 259, 261, 264, 280, 292, 301, 302, 315, 326, 345, 351, 363, 388,
+      417, 433, 484, 540, 643, 743,
+    ];
+    const pool = realisticKcal.map((kcal, i) =>
+      recipe(`r${i}`, `Dish ${i}`, { kcal, proteinG: 10 + (i % 20), fiberG: 2 + (i % 5) }),
+    );
+    const big = member("big", {
+      targets: { kcal: 2995, proteinG: 126, carbsG: 436, fatG: 83, fiberG: 42 },
+    });
+    const entries = generateWeek({ recipes: pool, members: [big], weekStart: "2026-11-02" });
+    const byDate = new Map<string, number>();
+    for (const e of entries) {
+      const dish = pool.find((r) => r.id === e.recipeId)!;
+      const factor = e.memberPortions[big.id] ?? e.servingsBase;
+      byDate.set(e.date, (byDate.get(e.date) ?? 0) + dish.kcal * factor);
+    }
+    expect(byDate.size).toBe(7);
+    for (const total of byDate.values()) {
+      expect(Math.abs(total - 2995) / 2995).toBeLessThan(0.1);
+    }
+  });
+
+  it("does not plan a dish that cannot physically reach the slot", () => {
+    const pool = [
+      recipe("chaat", "Sprouts Chaat", { kcal: 50 }),
+      recipe("curry", "Chicken Curry", { kcal: 351 }),
+      recipe("rice", "Steamed Rice", { kcal: 345 }),
+      recipe("dosa", "Egg Dosa", { kcal: 743 }),
+    ];
+    const entries = generateWeek({
+      recipes: pool,
+      members: [member("m", { targets: { kcal: 2995, proteinG: 126, carbsG: 436, fatG: 83, fiberG: 42 } })],
+      weekStart: "2026-11-02",
+    });
+    // A 50 kcal/serving dish would need ~18 servings for a 900 kcal dinner;
+    // it must not be picked while feasible mains exist.
+    expect(entries.filter((e) => e.slot === "dinner").every((e) => e.recipeId !== "chaat")).toBe(true);
   });
 
   it("does not repeat a dish within the same member's day when supply allows", () => {

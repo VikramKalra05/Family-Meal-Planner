@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
+import { WorkingBar } from "@/components/ai-working";
 import { addPantryItem } from "./actions";
 
 interface SimpleOption {
@@ -34,6 +35,7 @@ export function AddPantryForm({ ingredients }: { ingredients: SimpleOption[] }) 
     <form
       key={state.ok ?? "new"}
       action={handleSubmit}
+      aria-busy={pending}
       className="flex flex-wrap items-end gap-2 rounded-none bg-white p-4 border-2 border-neutral-900 shadow-[4px_4px_0_#111]"
     >
       <div className="min-w-64 flex-[2]">
@@ -90,10 +92,16 @@ export function AddPantryForm({ ingredients }: { ingredients: SimpleOption[] }) 
       <button
         type="submit"
         disabled={pending || !picked?.name.trim()}
-        className={primary}
+        className={`${primary} ${pending ? "nb-loading cursor-wait" : ""}`}
       >
-        {pending ? "Adding…" : "Add to pantry"}
+        {pending ? "◌ Adding…" : "Add to pantry"}
       </button>
+
+      {pending && (
+        <div className="w-full">
+          <WorkingBar label="Saving to pantry…" />
+        </div>
+      )}
 
       {state.error && <p className="w-full text-sm text-red-600">{state.error}</p>}
       {state.ok && <p className="w-full text-sm text-emerald-700">{state.ok}</p>}

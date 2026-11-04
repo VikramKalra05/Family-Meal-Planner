@@ -6,6 +6,7 @@ import { calculateTargets } from "@/lib/nutrition/engine";
 import { ageFromDob } from "@/lib/age";
 import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
+import { istDateISO } from "@/lib/date";
 
 export type WeightActionState = { error: string | null; ok: string | null };
 
@@ -25,7 +26,7 @@ export async function logWeight(_prev: WeightActionState, formData: FormData): P
   const kg = Math.round(parsed.data.weightKg * 10) / 10;
 
   const supabase = await createClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = istDateISO();
 
   const { error: logErr } = await supabase.from("weight_logs").upsert(
     { member_id: profile.id, logged_on: today, weight_kg: kg, source: "manual" },
@@ -88,7 +89,7 @@ export async function setTargetWeight(
 export async function hasLoggedToday(): Promise<boolean> {
   const profile = await requireFullProfile();
   const supabase = await createClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = istDateISO();
   const { data } = await supabase
     .from("weight_logs")
     .select("id")

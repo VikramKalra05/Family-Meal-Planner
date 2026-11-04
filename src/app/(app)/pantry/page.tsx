@@ -2,6 +2,7 @@ import { deletePantryItem, updatePantryItem } from "./actions";
 import { AddPantryForm } from "./add-pantry-form";
 import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
+import { SubmitButton } from "@/components/submit-button";
 
 export const instant = false;
 
@@ -17,14 +18,15 @@ export default async function PantryPage() {
   await requireFullProfile();
   const supabase = await createClient();
 
-  const { data: pantry } = await supabase
-    .from("pantry_items")
-    .select("id, name, quantity, unit, updated_at")
-    .order("name");
-  const { data: ingredients } = await supabase
-    .from("ingredients")
-    .select("id, name")
-    .order("name");
+  const [pantryRes, ingredientsRes] = await Promise.all([
+    supabase
+      .from("pantry_items")
+      .select("id, name, quantity, unit, updated_at")
+      .order("name"),
+    supabase.from("ingredients").select("id, name").order("name"),
+  ]);
+  const pantry = pantryRes.data;
+  const ingredients = ingredientsRes.data;
   const options = (ingredients ?? []).map((i) => ({ id: i.id, name: i.name }));
   const rows = (pantry ?? []) as PantryRow[];
 
@@ -63,15 +65,22 @@ export default async function PantryPage() {
                   className="w-24 rounded-none border-2 border-neutral-900 px-3 py-1.5 text-sm focus:shadow-[3px_3px_0_#111] focus:outline-none"
                 />
                 <span className="w-10 text-xs text-neutral-500">{item.unit}</span>
-                <button className="rounded-none border-2 border-neutral-900 px-3 py-1.5 text-xs font-medium hover:bg-amber-50">
+                <SubmitButton
+                  pendingText="Saving…"
+                  className="rounded-none border-2 border-neutral-900 px-3 py-1.5 text-xs font-medium hover:bg-amber-50 disabled:opacity-60"
+                >
                   Save
-                </button>
+                </SubmitButton>
               </form>
               <form action={deletePantryItem}>
                 <input type="hidden" name="id" value={item.id} />
-                <button className="rounded-none px-2 py-1.5 text-sm text-neutral-400 hover:bg-red-50 hover:text-red-600" aria-label={`Delete ${item.name}`}>
+                <SubmitButton
+                  pendingText="…"
+                  ariaLabel={`Delete ${item.name}`}
+                  className="rounded-none px-2 py-1.5 text-sm text-neutral-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-60"
+                >
                   ✕
-                </button>
+                </SubmitButton>
               </form>
             </div>
           </div>

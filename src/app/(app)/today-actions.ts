@@ -7,10 +7,11 @@ import { candidatesFor, type PlannerMember, type SlotKey } from "@/lib/planner";
 import { checkRate, rateLimited } from "@/lib/rate-limit";
 import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
+import { istDateISO, istHour } from "@/lib/date";
 
 export type IntakeActionState = { error: string | null; ok: string | null };
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => istDateISO();
 
 /** Craving/exra snack: logs it, then re-fits remaining planned slots to the leftover budget. */
 export async function cravingAction(
@@ -171,7 +172,7 @@ export async function aiLogIntakeAction(
   if (!text.success) return { error: text.error.issues[0]?.message ?? "Invalid input", ok: null };
 
   const provider = await resolveProvider();
-  if (!provider) return { error: "No AI provider configured — add one in Settings → AI Providers, or log manually below.", ok: null };
+  if (!provider) return { error: "No AI provider configured — add one in Settings → AI Providers, or use the craving form to log the calories manually.", ok: null };
   if (!checkRate(`ailog:${profile.id}`, 30, 60 * 60 * 1000)) return { error: rateLimited(30, 60 * 60 * 1000), ok: null };
 
   let items: z.infer<typeof aiParseSchema>["items"];
@@ -196,8 +197,7 @@ export async function aiLogIntakeAction(
   }
 
   const supabase = await createClient();
-  const now = new Date();
-  const hour = now.getHours();
+  const hour = istHour();
   const slot = hour < 11 ? "breakfast" : hour < 16 ? "lunch" : hour < 19 ? "snack" : "dinner";
   const today = todayISO();
 

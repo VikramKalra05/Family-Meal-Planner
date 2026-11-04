@@ -3,7 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import { requireFullProfile } from "@/lib/profile";
 import { loadPlanData } from "@/lib/plan-data";
 import { mondayOf, SLOT_KEYS } from "@/lib/planner";
+import { formatIstDate, istDateISO } from "@/lib/date";
 import { generateWeekAction, removeEntryAction, setEntryStatusAction } from "./actions";
+import { SubmitButton } from "@/components/submit-button";
 
 export const instant = false;
 
@@ -26,28 +28,24 @@ interface CellEntry {
 
 export default async function WeekPage({ searchParams }: PageProps<"/week">) {
   const { w, m } = await searchParams;
-  const weekStart = mondayOf(typeof w === "string" && /^\d{4}-\d{2}-\d{2}$/.test(w) ? w : new Date().toISOString().slice(0, 10));
+  const weekStart = mondayOf(typeof w === "string" && /^\d{4}-\d{2}-\d{2}$/.test(w) ? w : istDateISO());
   const prev = mondayOf(new Date(Date.parse(weekStart) - 7 * 86400000).toISOString());
   const next = mondayOf(new Date(Date.parse(weekStart) + 7 * 86400000).toISOString());
 
   const profile = await requireFullProfile();
   const supabase = await createClient();
-  const { members, recipesById } = await loadPlanData();
+  const { members, recipesById } = await loadPlanData(profile);
 
-  const { data: plan } = await supabase
+  // One query: plan + its entries. The old two-step read added a full
+  // Supabase round trip to every week view.
+  const { data: planRow } = await supabase
     .from("weekly_plans")
-    .select("id")
+    .select("id, plan_entries(id, entry_date, slot, member_id, recipe_id, servings_base, status, member_portions)")
     .eq("household_id", profile.household_id!)
     .eq("week_start", weekStart)
     .maybeSingle();
-  const { data: entries } = plan
-    ? await supabase
-        .from("plan_entries")
-        .select("id, entry_date, slot, member_id, recipe_id, servings_base, status, member_portions")
-        .eq("plan_id", plan.id)
-    : { data: null };
 
-  const rows = (entries ?? []) as {
+  const rows = ((planRow?.plan_entries ?? []) as unknown) as {
     id: string;
     entry_date: string;
     slot: string;
@@ -64,7 +62,9 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
   const viewMember = members.find((mm) => mm.id === viewMemberId);
 
   const portionOf = (e: (typeof rows)[number]) =>
-    e.member_portions?.[e.member_id ?? viewMemberId] ?? Number(e.servings_base) ?? 1;
+    e.member_portions?.[e.member_id ?? viewMemberId] ??
+    (e.member_id ? Number(e.servings_base) : 1) ??
+    1;
 
   function cellFor(date: string, slot: string): CellEntry | null {
     const e = rows.find(
@@ -90,9 +90,16 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
     new Date(Date.parse(weekStart) + i * 86400000).toISOString().slice(0, 10),
   );
   const dayLabel = (d: string) =>
-    new Date(d).toLocaleDateString("en-IN", { weekday: "short", day: "numeric" });
+    formatIstDate(d, { weekday: "short", day: "numeric" });
 
-  const hasPlan = !!plan && rows.length > 0;
+  const hasPlan = !!planRow && rows.length > 0;
+  const targetKcal = profile.targets_cache?.targets.kcal ?? null;
+  const dayTotals = days.map((date) => {
+    const total = SLOT_KEYS.reduce((sum, slot) => sum + (cellFor(date, slot)?.kcal ?? 0), 0);
+    const gap = targetKcal && targetKcal > 0 ? Math.abs(total - targetKcal) / targetKcal : null;
+    return { date, total, gap };
+  });
+  const worstGap = dayTotals.reduce((max, d) => Math.max(max, d.gap ?? 0), 0);
 
   return (
     <div className="space-y-4">
@@ -100,7 +107,7 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
         <div>
           <h1 className="text-xl font-extrabold uppercase tracking-tight">Week planner</h1>
           <p className="text-sm text-neutral-500">
-            {new Date(weekStart).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}
+            {formatIstDate(weekStart, { day: "numeric", month: "long", year: "numeric" })}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -118,15 +125,29 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
           </Link>
           <form action={generateWeekAction}>
             <input type="hidden" name="weekStart" value={weekStart} />
-            <button
-              className="rounded-none border-2 border-neutral-900 bg-emerald-400 px-4 py-2 text-xs font-extrabold uppercase tracking-wide text-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111]"
+            <SubmitButton
+              pendingText="◌ Generating…"
+              className="rounded-none border-2 border-neutral-900 bg-emerald-400 px-4 py-2 text-xs font-extrabold uppercase tracking-wide text-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] disabled:opacity-60"
               title={hasPlan ? "Discards the current plan and regenerates" : "Generate the week"}
             >
               ✨ {hasPlan ? "Regenerate" : "Generate week"}
-            </button>
+            </SubmitButton>
           </form>
         </div>
       </div>
+
+      {hasPlan && targetKcal && worstGap > 0.12 && (
+        <div className="border-2 border-neutral-900 bg-amber-200 px-4 py-3 text-sm shadow-[3px_3px_0_#111]">
+          <p className="font-extrabold uppercase tracking-wide">
+            ⚠ This plan is off your {targetKcal} kcal target by up to{" "}
+            {Math.round(worstGap * 100)}%
+          </p>
+          <p className="mt-0.5 text-xs text-neutral-700">
+            Hit <span className="font-bold">Regenerate</span> to refit every day to your target — portions
+            are scaled per member, so the whole day should land within a few percent.
+          </p>
+        </div>
+      )}
 
       {hasPlan && members.length > 1 && (
         <div className="flex flex-wrap items-center gap-2">
@@ -135,11 +156,13 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
             <Link
               key={mm.id}
               href={`/week?w=${weekStart}&m=${mm.id}`}
+              aria-current={viewMemberId === mm.id ? "page" : undefined}
               className={`rounded-full border-2 border-neutral-900 px-3 py-1 text-xs font-bold shadow-[2px_2px_0_#111] transition-all ${
                 viewMemberId === mm.id ? "bg-yellow-300 text-neutral-900" : "bg-white text-neutral-600 hover:bg-yellow-100"
               }`}
             >
               {mm.name}
+              {mm.id === profile.id ? " (you)" : ""}
             </Link>
           ))}
         </div>
@@ -204,14 +227,23 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
                                 <form action={setEntryStatusAction}>
                                   <input type="hidden" name="entryId" value={cell.id} />
                                   <input type="hidden" name="status" value="eaten" />
-                                  <button className="rounded-none border border-neutral-900 bg-lime-300 px-1.5 py-0.5 text-[9px] font-extrabold uppercase hover:bg-lime-400">
+                                  <SubmitButton
+                                    pendingText="…"
+                                    className="rounded-none border border-neutral-900 bg-lime-300 px-1.5 py-0.5 text-[9px] font-extrabold uppercase hover:bg-lime-400 disabled:opacity-60"
+                                  >
                                     ate
-                                  </button>
+                                  </SubmitButton>
                                 </form>
                               )}
                               <form action={removeEntryAction} className="ml-auto">
                                 <input type="hidden" name="entryId" value={cell.id} />
-                                <button className="text-[9px] font-bold text-neutral-300 hover:text-red-600" aria-label="Remove">✕</button>
+                                <SubmitButton
+                                  pendingText="…"
+                                  ariaLabel="Remove"
+                                  className="text-[9px] font-bold text-neutral-300 hover:text-red-600 disabled:opacity-60"
+                                >
+                                  ✕
+                                </SubmitButton>
                               </form>
                             </div>
                           </div>
@@ -228,14 +260,29 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
                 <th className="border-r-2 border-neutral-900 px-2.5 py-2 text-left text-xs font-extrabold uppercase tracking-widest text-neutral-500">
                   Day total
                 </th>
-                {days.map((date) => {
-                  const total = SLOT_KEYS.reduce((sum, slot) => {
-                    const cell = cellFor(date, slot);
-                    return sum + (cell?.kcal ?? 0);
-                  }, 0);
+                {dayTotals.map(({ date, total, gap }) => {
+                  const off = gap != null && gap > 0.12;
                   return (
-                    <td key={date + "t"} className="border-r-2 border-dashed border-neutral-200 px-2 py-2.5 text-center text-sm font-extrabold last:border-r-0">
-                      {total > 0 ? `${total} kcal` : "—"}
+                    <td
+                      key={date + "t"}
+                      className={`border-r-2 border-dashed border-neutral-200 px-2 py-2.5 text-center last:border-r-0 ${
+                        off ? "bg-red-100" : ""
+                      }`}
+                    >
+                      <p className="text-sm font-extrabold">
+                        {total > 0 ? `${total} kcal` : "—"}
+                      </p>
+                      {targetKcal != null && total > 0 && (
+                        <p className={`text-[9px] font-bold uppercase tracking-wide ${off ? "text-red-700" : "text-neutral-400"}`}>
+                          target {targetKcal}
+                          {gap != null && (
+                            <span className="ml-1">
+                              ({total >= targetKcal ? "+" : "−"}
+                              {Math.round(gap * 100)}%)
+                            </span>
+                          )}
+                        </p>
+                      )}
                     </td>
                   );
                 })}

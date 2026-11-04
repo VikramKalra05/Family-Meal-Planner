@@ -1,8 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireFullProfile } from "@/lib/profile";
-import { candidatesFor, mondayOf, SLOT_KEYS, type SlotKey } from "@/lib/planner";
+import { candidatesFor, mondayOf, sharedDiet, SLOT_KEYS, type SlotKey } from "@/lib/planner";
 import { loadPlanData } from "@/lib/plan-data";
 import { BackLink } from "@/components/back-link";
+import { SubmitButton } from "@/components/submit-button";
 import { swapEntryAction } from "../actions";
 
 export const instant = false;
@@ -27,10 +28,12 @@ export default async function SwapPage({
     .maybeSingle();
   if (!entryRow) return <p className="text-sm text-neutral-500">Entry not found.</p>;
 
-  const { plannerRecipes, members } = await loadPlanData();
+  const { plannerRecipes, members } = await loadPlanData(profile);
+  // Shared dinners have no single member_id; rank replacements against the
+  // household's combined diet/allergen rules (veg if anyone is veg).
   const eater = entryRow.member_id
     ? members.find((m) => m.id === entryRow.member_id) ?? members[0]
-    : undefined;
+    : sharedDiet(members);
   if (!eater) return <p className="text-sm text-neutral-500">No eater resolved for this entry.</p>;
 
   // Variety: avoid dishes already planned this week.
@@ -77,9 +80,12 @@ export default async function SwapPage({
             <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-neutral-500">
               {c.reason}
             </p>
-            <button className="mt-3 w-full rounded-none border-2 border-neutral-900 bg-emerald-400 px-5 py-3 text-sm font-extrabold uppercase tracking-wide text-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none">
+            <SubmitButton
+              pendingText="◌ Swapping…"
+              className="mt-3 w-full rounded-none border-2 border-neutral-900 bg-emerald-400 px-5 py-3 text-sm font-extrabold uppercase tracking-wide text-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none disabled:opacity-60"
+            >
               Choose this
-            </button>
+            </SubmitButton>
           </form>
         ))}
         {candidates.length === 0 && (

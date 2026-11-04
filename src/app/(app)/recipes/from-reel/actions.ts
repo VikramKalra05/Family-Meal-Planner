@@ -48,9 +48,12 @@ export async function draftRecipeFromUrl(input: {
 
   // Gather everything the post will give us: og/meta, then the Instagram
   // embed-caption fallback (works even when the main page is a login wall),
-  // plus whatever the user pasted manually.
-  const meta = await fetchPageMeta(input.url);
-  const embedded = await fetchInstagramCaption(input.url);
+  // plus whatever the user pasted manually. The two fetches are independent,
+  // so running them in parallel saves a full network round trip.
+  const [meta, embedded] = await Promise.all([
+    fetchPageMeta(input.url),
+    fetchInstagramCaption(input.url),
+  ]);
   const caption = input.caption?.trim() ? input.caption.trim() : embedded;
 
   // Hard honesty gate: with no real recipe text in hand we REFUSE instead of
@@ -114,69 +117,85 @@ export async function importDraftRecipe(draftInput: DraftRecipe & { source_url?:
   const { data: master } = await supabase
     .from("ingredients")
     .select("id, name, category, kcal_per_100g, protein_per_100g, carbs_per_100g, fat_per_100g, fiber_per_100g");
-  const byLower = new Map((master ?? []).map((i) => [i.name.toLowerCase(), i]));
+  type IngredientRow = NonNullable<typeof master>[number];
+  const byLower = new Map<string, IngredientRow>(
+    (master ?? []).map((i) => [i.name.toLowerCase(), i]),
+  );
 
-  const resolvedItems: {
-    id: string;
-    name: string;
-    category: string | null;
-    kcal: number; protein: number; carbs: number; fat: number; fiber: number | null;
-    grams: number;
-    note: string | null;
-    aiEstimated: boolean;
-  }[] = [];
+  // Unknown ingredients are estimated CONCURRENTLY — a 6-ingredient reel
+  // used to take six sequential 10–20s AI calls before the recipe appeared.
+  const unknownNames = [
+    ...new Set(
+      draft.ingredients
+        .map((i) => i.name.trim().toLowerCase())
+        .filter((name) => !byLower.has(name)),
+    ),
+  ];
 
-  let provider: Awaited<ReturnType<typeof resolveProvider>> = null;
-  for (const item of draft.ingredients) {
-    const key = item.name.trim().toLowerCase();
-    const hit = byLower.get(key);
-    if (hit) {
-      resolvedItems.push({
-        id: hit.id, name: hit.name, category: hit.category,
-        kcal: Number(hit.kcal_per_100g), protein: Number(hit.protein_per_100g),
-        carbs: Number(hit.carbs_per_100g), fat: Number(hit.fat_per_100g),
-        fiber: hit.fiber_per_100g == null ? null : Number(hit.fiber_per_100g),
-        grams: item.grams, note: item.note ?? null, aiEstimated: false,
-      });
-      continue;
-    }
-
-    // Unknown ingredient — estimate macros with AI and store household-scoped.
-    provider ??= await resolveProvider();
+  if (unknownNames.length > 0) {
+    const provider = await resolveProvider();
     if (!provider) return { error: "No AI provider configured — needed to estimate unknown ingredients." };
 
-    const est = await chatJson(provider, estimatedIngredientSchema, estimateMessages({ name: item.name }), { maxTokens: 400 });
-    const { data: created, error: insErr } = await supabase
+    const estimated = await Promise.all(
+      unknownNames.map(async (name) => {
+        const est = await chatJson(
+          provider,
+          estimatedIngredientSchema,
+          estimateMessages({ name }),
+          { maxTokens: 400 },
+        );
+        return { name, est };
+      }),
+    );
+    const estByLower = new Map(estimated.map((e) => [e.name, e.est]));
+
+    const { data: createdRows, error: insErr } = await supabase
       .from("ingredients")
-      .insert({
-        household_id: profile.household_id,
-        name: key,
-        category: "custom-ai",
-        kcal_per_100g: est.kcal_per_100g,
-        protein_per_100g: est.protein_per_100g,
-        carbs_per_100g: est.carbs_per_100g,
-        fat_per_100g: est.fat_per_100g,
-        fiber_per_100g: est.fiber_per_100g ?? null,
-      })
-      .select("id, name")
-      .single();
+      .insert(
+        unknownNames.map((name) => {
+          const est = estByLower.get(name)!;
+          return {
+            household_id: profile.household_id,
+            name,
+            category: "custom-ai",
+            kcal_per_100g: est.kcal_per_100g,
+            protein_per_100g: est.protein_per_100g,
+            carbs_per_100g: est.carbs_per_100g,
+            fat_per_100g: est.fat_per_100g,
+            fiber_per_100g: est.fiber_per_100g ?? null,
+          };
+        }),
+      )
+      .select("id, name, category, kcal_per_100g, protein_per_100g, carbs_per_100g, fat_per_100g, fiber_per_100g");
     if (insErr) return { error: insErr.message };
-    byLower.set(key, {
-      id: created.id,
-      name: created.name,
-      category: "custom-ai",
-      kcal_per_100g: est.kcal_per_100g,
-      protein_per_100g: est.protein_per_100g,
-      carbs_per_100g: est.carbs_per_100g,
-      fat_per_100g: est.fat_per_100g,
-      fiber_per_100g: est.fiber_per_100g ?? null,
-    });
-    resolvedItems.push({
-      id: created.id, name: created.name, category: "custom-ai",
-      kcal: est.kcal_per_100g, protein: est.protein_per_100g,
-      carbs: est.carbs_per_100g, fat: est.fat_per_100g, fiber: est.fiber_per_100g ?? null,
-      grams: item.grams, note: item.note ?? null, aiEstimated: true,
-    });
+    for (const row of createdRows ?? []) {
+      byLower.set(row.name.toLowerCase(), row);
+    }
+  }
+
+  const resolvedItems = draft.ingredients
+    .map((item) => {
+      const key = item.name.trim().toLowerCase();
+      const hit = byLower.get(key);
+      if (!hit) return null;
+      return {
+        id: hit.id,
+        name: hit.name,
+        category: hit.category,
+        kcal: Number(hit.kcal_per_100g),
+        protein: Number(hit.protein_per_100g),
+        carbs: Number(hit.carbs_per_100g),
+        fat: Number(hit.fat_per_100g),
+        fiber: hit.fiber_per_100g == null ? null : Number(hit.fiber_per_100g),
+        grams: item.grams,
+        note: item.note ?? null,
+        aiEstimated: hit.category === "custom-ai",
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
+
+  if (resolvedItems.length === 0) {
+    return { error: "Could not resolve any ingredient for this recipe." };
   }
 
   const nutrition = computeRecipeNutrition(

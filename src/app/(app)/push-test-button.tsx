@@ -41,12 +41,15 @@ export function PushTestButton() {
         type="button"
         onClick={() => void send()}
         disabled={state.busy}
-        className="rounded-none border-2 border-neutral-900 bg-white px-3 py-2 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none disabled:opacity-50"
+        aria-busy={state.busy}
+        className={`rounded-none border-2 border-neutral-900 bg-white px-3 py-2 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none disabled:opacity-60 ${
+          state.busy ? "nb-loading cursor-wait" : ""
+        }`}
       >
-        {state.busy ? "Sending…" : "🔔 Test push"}
+        {state.busy ? "◌ Sending…" : "🔔 Test push"}
       </button>
       {state.message && (
-        <p className={`max-w-56 text-right text-[10px] leading-snug ${state.ok ? "text-neutral-700" : "text-red-700"}`}>
+        <p role="status" aria-live="polite" className={`max-w-56 text-right text-[10px] leading-snug ${state.ok ? "text-neutral-700" : "text-red-700"}`}>
           {state.message}
         </p>
       )}

@@ -1,5 +1,6 @@
 import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
+import type { Profile } from "@/lib/db-types";
 import type { PlannerMember, PlannerRecipe, RecipeItemsInfo } from "@/lib/planner";
 import type { NutrientTargets } from "@/lib/nutrition/types";
 
@@ -23,19 +24,23 @@ export interface PlanData {
 }
 
 /** Loads everything the week planner needs for the current household. */
-export async function loadPlanData(): Promise<Omit<PlanData, "planId" | "entries">> {
-  const profile = await requireFullProfile();
+export async function loadPlanData(
+  profileArg?: Profile,
+): Promise<Omit<PlanData, "planId" | "entries">> {
+  const profile = profileArg ?? (await requireFullProfile());
   const supabase = await createClient();
   const householdId = profile.household_id!;
 
-  const recipesRes = await supabase
-    .from("recipes")
-    .select("id, title, is_veg, servings, prep_minutes, recipe_nutrition(kcal, protein_g, fiber_g), recipe_items(quantity_g, unit, ingredient_id, ingredients(name))")
-    .order("title");
-  const membersRes = await supabase
-    .from("profiles")
-    .select("id, display_name, diet_type, allergies, targets_cache, role")
-    .eq("household_id", householdId);
+  const [recipesRes, membersRes] = await Promise.all([
+    supabase
+      .from("recipes")
+      .select("id, title, is_veg, servings, prep_minutes, recipe_nutrition(kcal, protein_g, fiber_g), recipe_items(quantity_g, unit, ingredient_id, ingredients(name))")
+      .order("title"),
+    supabase
+      .from("profiles")
+      .select("id, display_name, diet_type, allergies, targets_cache, role")
+      .eq("household_id", householdId),
+  ]);
 
   const plannerRecipes: PlannerRecipe[] = [];
   const itemsByRecipe = new Map<string, RecipeItemsInfo>();
@@ -89,8 +94,10 @@ export async function loadPlanData(): Promise<Omit<PlanData, "planId" | "entries
   return { plannerRecipes, itemsByRecipe, members, recipesById };
 }
 
-export async function loadPantry(): Promise<{ ingredientId: string | null; name: string; quantity: number; unit: string }[]> {
-  const profile = await requireFullProfile();
+export async function loadPantry(
+  profileArg?: Profile,
+): Promise<{ ingredientId: string | null; name: string; quantity: number; unit: string }[]> {
+  const profile = profileArg ?? (await requireFullProfile());
   const supabase = await createClient();
   const { data } = await supabase
     .from("pantry_items")

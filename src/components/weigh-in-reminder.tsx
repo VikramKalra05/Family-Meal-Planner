@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { hasLoggedToday } from "@/app/(app)/progress/actions";
 import { ensurePushSubscription } from "@/lib/push-client";
+import { istMoment } from "@/lib/push";
 
 // One subscribe attempt per page load; the POST is an idempotent upsert.
 let pushSubscribed = false;
@@ -38,19 +39,21 @@ export function WeighInReminder({ weighInTime }: { weighInTime: string | null })
 
     const tick = async () => {
       const now = new Date();
-      const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      const { day, time: hhmm } = istMoment(now);
       if (hhmm < weighInTime) return;
 
       // Cadence: at most 2 nudges per day, 4h apart, remembered across
       // restarts (localStorage), and never on a day that's already logged.
-      const dayKey = `weigh-notify-${now.toISOString().slice(0, 10)}`;
+      const dayKey = `weigh-notify-${day}`;
       const count = Number(localStorage.getItem(dayKey) ?? 0);
       if (count >= 2) return;
 
-      if (await hasLoggedToday()) return;
-
+      // Check the local 4h gap BEFORE the server round trip — otherwise this
+      // timer pinged the server action every 60s for four hours.
       const lastAt = Number(localStorage.getItem("weigh-notify-at") ?? 0);
       if (count > 0 && Date.now() - lastAt < 4 * 60 * 60 * 1000) return;
+
+      if (await hasLoggedToday()) return;
 
       localStorage.setItem(dayKey, String(count + 1));
       localStorage.setItem("weigh-notify-at", String(Date.now()));

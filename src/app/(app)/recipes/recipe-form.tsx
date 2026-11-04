@@ -147,7 +147,7 @@ export function RecipeForm({
   }));
 
   return (
-    <form action={(fd) => formAction(prepare(fd))} className="space-y-5 pb-24">
+    <form action={(fd) => formAction(prepare(fd))} aria-busy={pending} className="space-y-5 pb-24">
       {recipeId && <input type="hidden" name="recipe_id" value={recipeId} />}
 
       <Section step="1" title="The basics" subtitle="Name it, size it, set the mood">
@@ -428,9 +428,11 @@ export function RecipeForm({
             <button
               type="submit"
               disabled={pending}
-              className="rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide disabled:opacity-50"
+              className={`rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide disabled:opacity-60 ${
+                pending ? "nb-loading cursor-wait" : ""
+              }`}
             >
-              {pending ? "Saving…" : "Save recipe"}
+              {pending ? "◌ Saving…" : "Save recipe"}
             </button>
           </div>
         </div>

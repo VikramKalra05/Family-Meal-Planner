@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireFullProfile } from "@/lib/profile";
 import { SendMessageForm } from "./family-forms";
 import { markMessageRead } from "./actions";
+import { SubmitButton } from "@/components/submit-button";
 
 export const instant = false;
 
@@ -125,9 +126,12 @@ export default async function FamilyPage() {
               {unread && (
                 <form action={markMessageRead} className="mt-2">
                   <input type="hidden" name="id" value={msg.id} />
-                  <button className="text-[10px] font-extrabold uppercase tracking-wide text-neutral-400 hover:text-neutral-900">
+                  <SubmitButton
+                    pendingText="Marking…"
+                    className="text-[10px] font-extrabold uppercase tracking-wide text-neutral-400 hover:text-neutral-900 disabled:opacity-60"
+                  >
                     Mark read
-                  </button>
+                  </SubmitButton>
                 </form>
               )}
             </div>

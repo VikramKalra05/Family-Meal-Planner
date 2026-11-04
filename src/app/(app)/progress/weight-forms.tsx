@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { logWeight, setTargetWeight, type WeightActionState } from "./actions";
+import { WorkingBar } from "@/components/ai-working";
 
 const input =
   "rounded-none border-2 border-neutral-900 bg-white px-3.5 py-2.5 text-sm focus:shadow-[3px_3px_0_#111] focus:outline-none";
@@ -16,18 +17,19 @@ export function QuickLogForm({ compact = false }: { compact?: boolean }) {
   const [state, action, pending] = useActionState(logWeight, init);
 
   return (
-    <form action={action} className={compact ? "flex items-end gap-2" : "flex flex-wrap items-end gap-2"}>
+    <form action={action} aria-busy={pending} className={compact ? "flex items-end gap-2" : "flex flex-wrap items-end gap-2"}>
       <div className={compact ? "w-28" : "w-32"}>
         <label className={label} htmlFor={`kg-${compact ? "c" : "f"}`}>Today&apos;s weight (kg)</label>
         <input
           id={`kg-${compact ? "c" : "f"}`}
           name="weightKg" type="number" step="0.1" min="25" max="250" required
+          disabled={pending}
           placeholder="69.4"
-          className={`${input} w-full`}
+          className={`${input} w-full disabled:bg-neutral-100`}
         />
       </div>
-      <button type="submit" disabled={pending} className={primary}>
-        {pending ? "Logging…" : "Log weigh-in"}
+      <button type="submit" disabled={pending} className={`${primary} ${pending ? "nb-loading cursor-wait" : ""}`}>
+        {pending ? "◌ Logging…" : "Log weigh-in"}
       </button>
       {compact ? (
         <span className={`text-xs font-bold ${state.ok ? "nb-stamp text-emerald-700" : "nb-shake text-red-700"}`}>
@@ -35,6 +37,7 @@ export function QuickLogForm({ compact = false }: { compact?: boolean }) {
         </span>
       ) : (
         <>
+          {pending && <div className="w-full"><WorkingBar label="Saving your weigh-in…" /></div>}
           {state.error && <p className="nb-shake w-full text-sm font-bold text-red-700">{state.error}</p>}
           {state.ok && <p className="nb-stamp w-full text-sm font-extrabold text-emerald-700">{state.ok}</p>}
         </>
@@ -54,14 +57,15 @@ export function GoalForm({
   const [state, action, pending] = useActionState(setTargetWeight, init);
 
   return (
-    <form action={action} className="flex flex-wrap items-end gap-2">
+    <form action={action} aria-busy={pending} className="flex flex-wrap items-end gap-2">
       <div className="w-32">
         <label className={label} htmlFor="targetKg">Target weight (kg)</label>
         <input
           id="targetKg" name="targetKg" type="number" step="0.1" min="25" max="250"
           defaultValue={targetKg ?? ""}
+          disabled={pending}
           placeholder="e.g. 75"
-          className={`${input} w-full`}
+          className={`${input} w-full disabled:bg-neutral-100`}
         />
       </div>
       <div className="w-36">
@@ -69,12 +73,14 @@ export function GoalForm({
         <input
           id="weighInTime" name="weighInTime" type="time"
           defaultValue={weighInTime ?? "07:30"}
-          className={input}
+          disabled={pending}
+          className={`${input} disabled:bg-neutral-100`}
         />
       </div>
-      <button type="submit" disabled={pending} className={primary}>
-        {pending ? "Saving…" : "Save goal"}
+      <button type="submit" disabled={pending} className={`${primary} ${pending ? "nb-loading cursor-wait" : ""}`}>
+        {pending ? "◌ Saving…" : "Save goal"}
       </button>
+      {pending && <div className="w-full"><WorkingBar label="Saving goal and reminder…" /></div>}
       {state.error && <p className="w-full text-sm text-red-600">{state.error}</p>}
       {state.ok && <p className="w-full text-sm text-emerald-700">{state.ok}</p>}
       <p className="w-full text-[10px] text-neutral-400">

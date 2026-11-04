@@ -2,8 +2,10 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { mondayOf } from "@/lib/planner";
 import { requireFullProfile } from "@/lib/profile";
+import { formatIstDate, istDateISO } from "@/lib/date";
 import { buildShoppingListAction, toggleShoppingItemAction } from "../week/actions";
 import { ShareButton } from "./share-button";
+import { SubmitButton } from "@/components/submit-button";
 
 export const instant = false;
 
@@ -15,22 +17,26 @@ interface Item {
 
 export default async function ShoppingPage({ searchParams }: PageProps<"/shopping">) {
   const { w } = await searchParams;
-  const weekStart = mondayOf(typeof w === "string" && /^\d{4}-\d{2}-\d{2}$/.test(w) ? w : new Date().toISOString().slice(0, 10));
+  const weekStart = mondayOf(typeof w === "string" && /^\d{4}-\d{2}-\d{2}$/.test(w) ? w : istDateISO());
   const profile = await requireFullProfile();
   const supabase = await createClient();
 
-  const { data: plan } = await supabase
-    .from("weekly_plans")
-    .select("id")
-    .eq("household_id", profile.household_id!)
-    .eq("week_start", weekStart)
-    .maybeSingle();
-  const { data: list } = await supabase
-    .from("shopping_lists")
-    .select("id, items")
-    .eq("household_id", profile.household_id!)
-    .eq("week_start", weekStart)
-    .maybeSingle();
+  const [planRes, listRes] = await Promise.all([
+    supabase
+      .from("weekly_plans")
+      .select("id")
+      .eq("household_id", profile.household_id!)
+      .eq("week_start", weekStart)
+      .maybeSingle(),
+    supabase
+      .from("shopping_lists")
+      .select("id, items")
+      .eq("household_id", profile.household_id!)
+      .eq("week_start", weekStart)
+      .maybeSingle(),
+  ]);
+  const plan = planRes.data;
+  const list = listRes.data;
 
   const items = (list?.items ?? []) as Item[];
   const unchecked = items.filter((i) => !i.checked).length;
@@ -41,7 +47,8 @@ export default async function ShoppingPage({ searchParams }: PageProps<"/shoppin
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Shopping list</h1>
           <p className="text-sm text-neutral-500">
-            Week of {new Date(weekStart).toLocaleDateString("en-IN", { day: "numeric", month: "long" })} ·
+            Week of{" "}
+            {formatIstDate(weekStart, { day: "numeric", month: "long" })} ·
             {" "}plan needs minus pantry stock
           </p>
         </div>
@@ -54,12 +61,13 @@ export default async function ShoppingPage({ searchParams }: PageProps<"/shoppin
           </Link>
           <form action={buildShoppingListAction}>
             <input type="hidden" name="weekStart" value={weekStart} />
-            <button
-              className="rounded-none border-2 border-neutral-900 bg-emerald-400 px-5 py-3 text-sm font-extrabold uppercase tracking-wide text-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111]"
+            <SubmitButton
+              pendingText="◌ Building…"
+              className="rounded-none border-2 border-neutral-900 bg-emerald-400 px-5 py-3 text-sm font-extrabold uppercase tracking-wide text-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] disabled:opacity-60"
               title={plan ? "Recalculates from the current plan and pantry" : "Generate a week plan first"}
             >
               🔄 Build from plan
-            </button>
+            </SubmitButton>
           </form>
           {items.length > 0 && <ShareButton items={items} weekStart={weekStart} />}
         </div>
@@ -107,11 +115,14 @@ export default async function ShoppingPage({ searchParams }: PageProps<"/shoppin
                   <form action={toggleShoppingItemAction}>
                     <input type="hidden" name="weekStart" value={weekStart} />
                     <input type="hidden" name="index" value={index} />
-                    <button className={`rounded-none border-2 border-neutral-900 px-2 py-1 text-[10px] font-extrabold uppercase shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none ${
-                      item.checked ? "bg-white" : "bg-lime-300"
-                    }`}>
+                    <SubmitButton
+                      pendingText="…"
+                      className={`rounded-none border-2 border-neutral-900 px-2 py-1 text-[10px] font-extrabold uppercase shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none disabled:opacity-60 ${
+                        item.checked ? "bg-white" : "bg-lime-300"
+                      }`}
+                    >
                       {item.checked ? "Unbuy" : "Got it"}
-                    </button>
+                    </SubmitButton>
                   </form>
                 </div>
               </li>

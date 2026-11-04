@@ -2,6 +2,7 @@
 
 import { useActionState, useState, useTransition } from "react";
 import { addAiProvider, testRawProvider } from "./actions";
+import { AiWorking } from "@/components/ai-working";
 
 const input =
   "w-full rounded-none border-2 border-neutral-900 bg-white px-3.5 py-2.5 text-sm transition focus:shadow-[3px_3px_0_#111] focus:outline-none";
@@ -38,7 +39,7 @@ export function AddProviderForm() {
   }
 
   return (
-    <form id="add-provider-form" action={action} className="space-y-4">
+    <form id="add-provider-form" action={action} aria-busy={pending || testing} className="space-y-4">
       <div>
         <label className={label} htmlFor="preset">Quick fill</label>
         <select
@@ -82,6 +83,12 @@ export function AddProviderForm() {
           {testResult}
         </p>
       )}
+      {testing && (
+        <AiWorking
+          label="Testing the endpoint…"
+          hint="A tiny completion checks the base URL, model id and API key. Slow gateways are retried once."
+        />
+      )}
       {state.error && <p className="rounded-none bg-red-50 px-3 py-2 text-xs font-medium text-red-700">{state.error}</p>}
       {state.ok && <p className="rounded-none bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">{state.ok}</p>}
 
@@ -90,16 +97,20 @@ export function AddProviderForm() {
           type="button"
           onClick={runTest}
           disabled={testing}
-          className="rounded-none border-2 border-neutral-900 px-4 py-2.5 text-sm font-medium text-neutral-700 hover:bg-amber-50 disabled:opacity-50"
+          className={`rounded-none border-2 border-neutral-900 px-4 py-2.5 text-sm font-medium text-neutral-700 hover:bg-amber-50 disabled:opacity-60 ${
+            testing ? "nb-loading cursor-wait" : ""
+          }`}
         >
-          {testing ? "Testing…" : "Test connection"}
+          {testing ? "◌ Testing…" : "Test connection"}
         </button>
         <button
           type="submit"
           disabled={pending}
-          className="flex-1 rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide disabled:opacity-50"
+          className={`flex-1 rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide disabled:opacity-60 ${
+            pending ? "nb-loading cursor-wait" : ""
+          }`}
         >
-          {pending ? "Adding…" : "Add provider"}
+          {pending ? "◌ Adding…" : "Add provider"}
         </button>
       </div>
     </form>

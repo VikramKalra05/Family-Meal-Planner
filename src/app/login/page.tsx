@@ -67,9 +67,9 @@ export default function LoginPage() {
         <button
           onClick={signInWithGoogle}
           disabled={busy}
-          className="w-full rounded-none border-2 border-neutral-900 bg-white px-4 py-2.5 text-sm font-medium hover:bg-amber-50 disabled:opacity-50"
+          className="w-full rounded-none border-2 border-neutral-900 bg-white px-4 py-2.5 text-sm font-medium hover:bg-amber-50 disabled:opacity-60"
         >
-          Continue with Google
+          {busy ? "◌ Connecting to Google…" : "Continue with Google"}
         </button>
 
         <div className="flex items-center gap-3 text-xs text-neutral-400">
@@ -78,7 +78,7 @@ export default function LoginPage() {
         </div>
 
         {!otpSent ? (
-          <form onSubmit={sendOtp} className="space-y-3">
+          <form onSubmit={sendOtp} aria-busy={busy} className="space-y-3">
             <input
               type="tel"
               required
@@ -90,13 +90,13 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={busy}
-              className="w-full rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide disabled:opacity-50"
+              className="w-full rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide disabled:opacity-60"
             >
-              Send OTP
+              {busy ? "◌ Sending OTP…" : "Send OTP"}
             </button>
           </form>
         ) : (
-          <form onSubmit={verifyOtp} className="space-y-3">
+          <form onSubmit={verifyOtp} aria-busy={busy} className="space-y-3">
             <input
               inputMode="numeric"
               required
@@ -108,9 +108,9 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={busy}
-              className="w-full rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide disabled:opacity-50"
+              className="w-full rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide disabled:opacity-60"
             >
-              Verify & continue
+              {busy ? "◌ Verifying…" : "Verify & continue"}
             </button>
           </form>
         )}

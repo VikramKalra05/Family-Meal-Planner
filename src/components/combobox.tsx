@@ -41,6 +41,7 @@ export function Combobox({
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const [creating, setCreating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [newMacros, setNewMacros] = useState({ kcal: "", protein: "", carbs: "", fat: "" });
   const [estimating, setEstimating] = useState(false);
   const [estimateNote, setEstimateNote] = useState<string | null>(null);
@@ -96,17 +97,22 @@ export function Combobox({
   }
 
   async function submitCreate() {
-    if (!onCreate) return;
-    await onCreate(query.trim(), {
-      kcal: Number(newMacros.kcal) || 0,
-      protein: Number(newMacros.protein) || 0,
-      carbs: Number(newMacros.carbs) || 0,
-      fat: Number(newMacros.fat) || 0,
-    });
-    setOpen(false);
-    setCreating(false);
-    setQuery("");
-    setNewMacros({ kcal: "", protein: "", carbs: "", fat: "" });
+    if (!onCreate || submitting) return;
+    setSubmitting(true);
+    try {
+      await onCreate(query.trim(), {
+        kcal: Number(newMacros.kcal) || 0,
+        protein: Number(newMacros.protein) || 0,
+        carbs: Number(newMacros.carbs) || 0,
+        fat: Number(newMacros.fat) || 0,
+      });
+      setOpen(false);
+      setCreating(false);
+      setQuery("");
+      setNewMacros({ kcal: "", protein: "", carbs: "", fat: "" });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -134,7 +140,7 @@ export function Combobox({
       {open && (
         <div className="absolute z-20 mt-1.5 w-full overflow-hidden rounded-none border-2 border-neutral-900 bg-white shadow-[4px_4px_0_#111]">
           {creating ? (
-            <div className="p-3">
+            <div className="p-3" aria-busy={submitting}>
               <p className="mb-2 text-xs font-medium text-neutral-600">
                 New ingredient: <span className="text-emerald-700">{query.trim()}</span> — nutrition per 100 g:
               </p>
@@ -169,7 +175,8 @@ export function Combobox({
                 {onEstimate && (
                   <button
                     type="button"
-                    disabled={estimating}
+                    disabled={estimating || submitting}
+                    aria-busy={estimating}
                     onClick={async () => {
                       setEstimating(true);
                       setEstimateNote(null);
@@ -187,7 +194,9 @@ export function Combobox({
                         setEstimateNote("✓ Estimated — review and adjust");
                       }
                     }}
-                    className="rounded-none border-2 border-neutral-900 bg-white px-3 py-1.5 text-xs font-medium font-extrabold uppercase tracking-wide text-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] disabled:opacity-50"
+                    className={`rounded-none border-2 border-neutral-900 bg-white px-3 py-1.5 text-xs font-medium font-extrabold uppercase tracking-wide text-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] disabled:opacity-60 ${
+                      estimating ? "nb-loading cursor-wait" : ""
+                    }`}
                   >
                     {estimating ? "◌ Estimating…" : "✨ Estimate with AI"}
                   </button>
@@ -195,18 +204,28 @@ export function Combobox({
                 <button
                   type="button"
                   onClick={submitCreate}
-                  className="flex-1 rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide"
+                  disabled={submitting || estimating}
+                  className={`flex-1 rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide disabled:opacity-60 ${
+                    submitting ? "nb-loading cursor-wait" : ""
+                  }`}
                 >
-                  Create ingredient
+                  {submitting ? "◌ Creating…" : "Create ingredient"}
                 </button>
                 <button
                   type="button"
                   onClick={() => setCreating(false)}
-                  className="rounded-none border-2 border-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:bg-amber-50"
+                  disabled={submitting}
+                  className="rounded-none border-2 border-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:bg-amber-50 disabled:opacity-60"
                 >
                   Cancel
                 </button>
               </div>
+              {estimating && (
+                <p role="status" aria-live="polite" className="mt-2 flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-wide text-neutral-500">
+                  <span className="h-2 w-16 border-2 border-neutral-900 bg-white nb-loading" aria-hidden />
+                  Asking the AI for macros…
+                </p>
+              )}
               {estimateNote && (
                 <p className={`mt-2 text-[10px] font-extrabold uppercase tracking-wide ${estimateNote.startsWith("✓") ? "nb-stamp text-emerald-700" : "nb-shake text-red-600"}`}>
                   {estimateNote}

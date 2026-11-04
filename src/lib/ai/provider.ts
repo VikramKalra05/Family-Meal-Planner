@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { getUser } from "@/lib/profile";
 import { decryptSecret } from "@/lib/crypto";
 
 export interface ResolvedProvider {
@@ -26,9 +27,7 @@ const providerRowSchema = z.object({
  */
 export async function resolveProvider(): Promise<ResolvedProvider | null> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getUser();
   if (user) {
     const { data: rows } = await supabase
       .from("ai_providers")

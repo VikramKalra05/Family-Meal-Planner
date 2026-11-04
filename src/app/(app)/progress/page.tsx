@@ -4,6 +4,7 @@ import { progressPct, projectTargetDate, weightTrend, type WeightPoint } from "@
 import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
 import type { WeightLog } from "@/lib/db-types";
+import { istDateISO } from "@/lib/date";
 
 export const instant = false;
 
@@ -28,7 +29,7 @@ export default async function ProgressPage() {
   const trend = weightTrend(points);
   const pct = progressPct(points, targetKg);
   const projection = projectTargetDate(points, targetKg, trend);
-  const loggedToday = points.at(-1)?.date === new Date().toISOString().slice(0, 10);
+  const loggedToday = points.at(-1)?.date === istDateISO();
 
   const trendLabel =
     trend == null

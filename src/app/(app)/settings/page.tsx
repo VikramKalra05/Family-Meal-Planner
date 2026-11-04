@@ -3,6 +3,7 @@ import { ageFromDob } from "@/lib/age";
 import { deleteAiProvider, setDefaultAiProvider } from "./actions";
 import { AddProviderForm } from "./provider-form";
 import { TestSavedButton } from "./test-saved-button";
+import { SubmitButton } from "@/components/submit-button";
 import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "@/app/auth/actions";
@@ -95,7 +96,12 @@ export default async function SettingsPage() {
             </div>
           )}
           <form action={signOut} className="mt-4 border-t-2 border-neutral-900 pt-3">
-            <button className="text-xs font-medium text-red-600 hover:text-red-700">Sign out</button>
+            <SubmitButton
+              pendingText="Signing out…"
+              className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-60"
+            >
+              Sign out
+            </SubmitButton>
           </form>
         </div>
 
@@ -190,16 +196,22 @@ export default async function SettingsPage() {
                 {!p.is_default && (
                   <form action={setDefaultAiProvider}>
                     <input type="hidden" name="id" value={p.id} />
-                    <button className="rounded-none border-2 border-neutral-900 px-3 py-1.5 text-xs font-medium hover:bg-amber-50">
+                    <SubmitButton
+                      pendingText="Setting…"
+                      className="rounded-none border-2 border-neutral-900 px-3 py-1.5 text-xs font-medium hover:bg-amber-50 disabled:opacity-60"
+                    >
                       Make default
-                    </button>
+                    </SubmitButton>
                   </form>
                 )}
                 <form action={deleteAiProvider}>
                   <input type="hidden" name="id" value={p.id} />
-                  <button className="rounded-none px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50">
+                  <SubmitButton
+                    pendingText="Removing…"
+                    className="rounded-none px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+                  >
                     Remove
-                  </button>
+                  </SubmitButton>
                 </form>
               </div>
             </div>

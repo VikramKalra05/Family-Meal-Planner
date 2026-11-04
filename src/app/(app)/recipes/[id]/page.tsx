@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { deleteRecipe, tagRecipeMedia, untagRecipeMedia } from "../actions";
 import { BackLink } from "@/components/back-link";
+import { SubmitButton } from "@/components/submit-button";
 import { PortionCalculator, type CalcIngredient, type CalcMember } from "./portion-calculator";
 import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
@@ -47,18 +48,22 @@ export default async function RecipeDetailPage({
     .maybeSingle();
   if (!recipe) notFound();
 
-  const { data: items } = await supabase
-    .from("recipe_items")
-    .select("id, quantity_g, unit, note, ingredients(name, name_hi)")
-    .eq("recipe_id", id);
+  const [{ data: items }, householdRes] = await Promise.all([
+    supabase
+      .from("recipe_items")
+      .select("id, quantity_g, unit, note, ingredients(name, name_hi)")
+      .eq("recipe_id", id),
+    profile.household_id
+      ? supabase
+          .from("profiles")
+          .select("id, display_name, targets_cache")
+          .eq("household_id", profile.household_id)
+      : Promise.resolve({ data: null }),
+  ]);
 
   let members: CalcMember[] = [{ id: profile.id, name: profile.display_name, targets: profile.targets_cache?.targets ?? null }];
-  if (profile.household_id) {
-    const { data: household } = await supabase
-      .from("profiles")
-      .select("id, display_name, targets_cache")
-      .eq("household_id", profile.household_id);
-    members = ((household ?? []) as Pick<Profile, "id" | "display_name" | "targets_cache">[])
+  if (householdRes.data) {
+    members = ((householdRes.data ?? []) as Pick<Profile, "id" | "display_name" | "targets_cache">[])
       .filter((m) => m.targets_cache)
       .map((m) => ({ id: m.id, name: m.display_name, targets: m.targets_cache!.targets }));
     if (!members.some((m) => m.id === profile.id)) {
@@ -140,9 +145,12 @@ export default async function RecipeDetailPage({
           </Link>
           <form action={deleteRecipe}>
             <input type="hidden" name="recipe_id" value={r.id} />
-            <button className="rounded-none border-2 border-neutral-900 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50">
+            <SubmitButton
+              pendingText="Deleting…"
+              className="rounded-none border-2 border-neutral-900 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+            >
               Delete
-            </button>
+            </SubmitButton>
           </form>
         </div>
       )}
@@ -176,7 +184,13 @@ export default async function RecipeDetailPage({
                 <form action={untagRecipeMedia} className="absolute right-1 top-1">
                   <input type="hidden" name="mediaId" value={m.id} />
                   <input type="hidden" name="recipeId" value={r.id} />
-                  <button className="rounded-none border-2 border-neutral-900 bg-white px-1.5 text-[10px] font-extrabold leading-5 shadow-[2px_2px_0_#111] hover:bg-red-300" aria-label="Remove tag">✕</button>
+                  <SubmitButton
+                    pendingText="…"
+                    ariaLabel="Remove tag"
+                    className="rounded-none border-2 border-neutral-900 bg-white px-1.5 text-[10px] font-extrabold leading-5 shadow-[2px_2px_0_#111] hover:bg-red-300 disabled:opacity-60"
+                  >
+                    ✕
+                  </SubmitButton>
                 </form>
                 </div>
               );
@@ -207,9 +221,12 @@ export default async function RecipeDetailPage({
           <label htmlFor={`mlabel-${r.id}`} className="mb-1 block text-[10px] font-extrabold uppercase tracking-widest text-neutral-400">Label</label>
           <input id={`mlabel-${r.id}`} name="label" placeholder="optional" className="w-full rounded-none border-2 border-neutral-900 bg-white px-2.5 py-2 text-xs focus:shadow-[3px_3px_0_#111] focus:outline-none" />
         </div>
-        <button className="rounded-none border-2 border-neutral-900 bg-emerald-400 px-4 py-2 text-xs font-extrabold uppercase tracking-wide text-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111]">
+        <SubmitButton
+          pendingText="Tagging…"
+          className="rounded-none border-2 border-neutral-900 bg-emerald-400 px-4 py-2 text-xs font-extrabold uppercase tracking-wide text-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] disabled:opacity-60"
+        >
           + Tag
-        </button>
+        </SubmitButton>
       </form>
 
       <div className={`overflow-hidden rounded-none border-2 border-neutral-900 shadow-[4px_4px_0_#111] ${hero ? "" : "hidden"}`}>
@@ -218,7 +235,7 @@ export default async function RecipeDetailPage({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={hero} alt={r.title} className="h-64 w-full object-cover" />
             <p className="bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-neutral-400">
-              Photo via Wikimedia Commons
+              Recipe photo
             </p>
           </>
         )}

@@ -1,7 +1,12 @@
+import { cache } from "react";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
-export async function createClient() {
+/**
+ * One Supabase client per request. Server components and the shared layout
+ * used to build separate clients (and re-run auth) for the same render.
+ */
+export const createClient = cache(async () => {
   const store = await cookies();
 
   return createServerClient(
@@ -23,4 +28,4 @@ export async function createClient() {
       },
     },
   );
-}
+});

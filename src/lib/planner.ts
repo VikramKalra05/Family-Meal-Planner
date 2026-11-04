@@ -42,16 +42,6 @@ export interface PlannerMember {
   targets: NutrientTargets;
 }
 
-export interface PlannedEntry {
-  date: string; // yyyy-mm-dd
-  slot: SlotKey;
-  /** null = shared family dish */
-  memberId: string | null;
-  recipeId: string;
-  /** portions of the recipe to cook */
-  servingsBase: number;
-}
-
 function slotTargetKcal(member: PlannerMember, slot: SlotKey): number {
   return member.targets.kcal * SLOT_SPLIT[slot];
 }
@@ -96,16 +86,57 @@ function dietAllows(recipe: PlannerRecipe, diet: PlannerMember["diet"]): boolean
 
 export interface ScoredCandidate {
   recipe: PlannerRecipe;
-  /** kcal gap vs the slot target — informational now, portions absorb it */
+  /** |planned kcal − slot target| / slot target after portioning. */
   kcalGap: number;
   score: number;
   reason: string;
+  /** Portion multiplier that will be stored on the plan entry. */
+  portion: number;
+}
+
+/** Portion bounds. A "serving" is recipe-defined, so 3× a light dish is normal. */
+export const PORTION_MIN = 0.25;
+export const PORTION_MAX = 3;
+
+export interface PortionFit {
+  /** Portion multiplier after quarter-step rounding and clamping. */
+  portion: number;
+  /** kcal the eater actually gets with that portion. */
+  kcal: number;
+  target: number;
+  /** |kcal − target| / target (0 = exact). */
+  gap: number;
+  /** The mathematically exact multiplier before clamping/rounding. */
+  rawPortion: number;
+}
+
+/** How much of one serving this member should eat to hit the slot target. */
+export function fitFor(recipe: PlannerRecipe, member: PlannerMember, slot: SlotKey): PortionFit {
+  const target = slotTargetKcal(member, slot);
+  const rawPortion = target / Math.max(1, recipe.kcal);
+  const portion = Math.min(
+    PORTION_MAX,
+    Math.max(PORTION_MIN, Math.round(rawPortion * 4) / 4),
+  );
+  const kcal = recipe.kcal * portion;
+  return {
+    portion,
+    kcal,
+    target,
+    gap: Math.abs(kcal - target) / Math.max(1, target),
+    rawPortion,
+  };
+}
+
+export function portionFor(recipe: PlannerRecipe, member: PlannerMember, slot: SlotKey): number {
+  return fitFor(recipe, member, slot).portion;
 }
 
 /**
- * Variety-first scoring: portions scale to hit slot targets, so kcal fit is
- * no longer the ranking driver. Repetition is penalised hard and capped
- * (max 2 uses per recipe per week, enforced by the caller).
+ * Variety-first scoring with a hard look at achievable calories. Portions are
+ * clamped to 0.25–3× a serving, so a 50 kcal/serving chaat can never fill a
+ * 900 kcal dinner slot. Ranking on the *post-portion* gap stops the engine
+ * from picking dishes it cannot actually scale to the target.
  */
 export function scoreCandidate(
   recipe: PlannerRecipe,
@@ -113,8 +144,7 @@ export function scoreCandidate(
   slot: SlotKey,
   usedCount: number,
 ): ScoredCandidate {
-  const target = slotTargetKcal(member, slot);
-  const kcalGap = Math.abs(recipe.kcal - target) / Math.max(1, target);
+  const fit = fitFor(recipe, member, slot);
   let score = 1;
   score += healthScore({
     kcal: recipe.kcal,
@@ -125,19 +155,23 @@ export function scoreCandidate(
   }) / 400;
   if (recipe.prepMinutes != null && recipe.prepMinutes <= 20) score += 0.1;
   score -= usedCount * 0.3;
+  // Calorie fit dominates; a 10% gap costs 0.25, a 50% gap costs 1.25.
+  score -= fit.gap * 2.5;
+  // Prefer dishes that land in a believable portion range naturally.
+  if (fit.rawPortion < PORTION_MIN || fit.rawPortion > PORTION_MAX) score -= 0.35;
+  if (fit.portion > 2) score -= (fit.portion - 2) * 0.15;
 
   const reasons: string[] = [];
   if (recipe.prepMinutes != null && recipe.prepMinutes <= 20) reasons.push("quick");
   if (recipe.fiberG >= 5) reasons.push("fiber");
   if (recipe.proteinG >= 15) reasons.push("protein");
-  return { recipe, kcalGap, score, reason: reasons.join(", ") || "balanced pick" };
+  return { recipe, kcalGap: fit.gap, score, reason: reasons.join(", ") || "balanced pick", portion: fit.portion };
 }
 
-/** How much of one serving this member should eat to hit the slot target. */
-export function portionFor(recipe: PlannerRecipe, member: PlannerMember, slot: SlotKey): number {
-  const target = slotTargetKcal(member, slot);
-  const raw = target / Math.max(1, recipe.kcal);
-  return Math.min(2, Math.max(0.25, Math.round(raw * 4) / 4)); // quarter-portions, 0.25–2
+/** Diet + allergen safety for one eater. Exported so server actions can
+ *  re-validate a submitted recipe, not just trust the candidate list UI. */
+export function isRecipeSafeFor(recipe: PlannerRecipe, member: PlannerMember): boolean {
+  return dietAllows(recipe, member.diet) && matchesAllergies(recipe, member.allergies);
 }
 
 /** Filters + ranks candidates for a member/slot. */
@@ -149,7 +183,7 @@ export function candidatesFor(
   limit = 6,
 ): ScoredCandidate[] {
   return recipes
-    .filter((r) => dietAllows(r, member.diet) && matchesAllergies(r, member.allergies))
+    .filter((r) => isRecipeSafeFor(r, member))
     .map((r) => scoreCandidate(r, member, slot, usedTitles.has(r.title) ? 1 : 0))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
@@ -180,8 +214,9 @@ export function sharedDiet(members: PlannerMember[]): PlannerMember {
 
 /**
  * Picks the best-safe candidate with tiered fallback so weeks are always
- * full, even with a tiny library: prefer fresh dishes, then allow repeats,
- * then allow same-day repeats — diet and allergen safety are never relaxed.
+ * full, even with a tiny library. Calorie fit comes first (a plan whose days
+ * miss the target by 40% is not a plan), then variety, then a final
+ * safety-only fallback. Diet and allergen safety are never relaxed.
  */
 function pickRanked(
   pool: PlannerRecipe[],
@@ -194,9 +229,20 @@ function pickRanked(
     .filter((r) => dietAllows(r, member.diet) && matchesAllergies(r, member.allergies))
     .map((r) => scoreCandidate(r, member, slot, usage.get(r.title) ?? 0))
     .sort((a, b) => b.score - a.score);
+  const withinCap = scored.filter((c) => (usage.get(c.recipe.title) ?? 0) < 2);
+  const fresh = withinCap.filter((c) => !dayTitles.has(c.recipe.title));
+  const dayFresh = scored.filter((c) => !dayTitles.has(c.recipe.title));
+
+  // Prefer a dish that can actually hit the slot, keep the day varied, then
+  // fall back gradually. Day-fresh dishes may exceed the weekly 2-use cap:
+  // repeating a dish twice in one day is worse than a third use this week.
   const tiers = [
-    scored.filter((c) => (usage.get(c.recipe.title) ?? 0) < 2 && !dayTitles.has(c.recipe.title)),
-    scored.filter((c) => (usage.get(c.recipe.title) ?? 0) < 2),
+    fresh.filter((c) => c.kcalGap <= 0.15),
+    dayFresh.filter((c) => c.kcalGap <= 0.15),
+    fresh.filter((c) => c.kcalGap <= 0.35),
+    dayFresh.filter((c) => c.kcalGap <= 0.35),
+    dayFresh,
+    withinCap,
     scored,
   ];
   for (const tier of tiers) {
@@ -273,7 +319,7 @@ export function generateWeek(input: GenerateInput): PlannedEntry[] {
         const pick = pickRanked(recipes, member, slot, usage, dayTitles);
         if (!pick) continue;
         const dish = pick.recipe;
-        const portion = portionFor(dish, member, slot);
+        const portion = pick.portion;
         usage.set(dish.title, (usage.get(dish.title) ?? 0) + 1);
         dayTitles.add(dish.title);
         entries.push({

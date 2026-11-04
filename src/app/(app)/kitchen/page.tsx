@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireFullProfile } from "@/lib/profile";
 import { mondayOf } from "@/lib/planner";
+import { formatIstDate, istDateISO } from "@/lib/date";
 
 export const instant = false;
 
@@ -28,7 +29,7 @@ export default async function KitchenPage({
   if (profile.role !== "staff" && profile.role !== "owner") {
     redirect("/family");
   }
-  const weekStart = mondayOf(typeof w === "string" && /^\d{4}-\d{2}-\d{2}$/.test(w) ? w : new Date().toISOString().slice(0, 10));
+  const weekStart = mondayOf(typeof w === "string" && /^\d{4}-\d{2}-\d{2}$/.test(w) ? w : istDateISO());
 
   const supabase = await createClient();
   const { data: plan } = await supabase
@@ -54,7 +55,7 @@ export default async function KitchenPage({
         <div>
           <h1 className="text-xl font-extrabold uppercase tracking-tight">🍳 Kitchen Mode</h1>
           <p className="text-sm text-neutral-500">
-            Week of {new Date(weekStart).toLocaleDateString("en-IN", { day: "numeric", month: "long" })} — dishes and
+            Week of {formatIstDate(weekStart, { day: "numeric", month: "long" })} — dishes and
             quantities only. Family health data is not shown here.
           </p>
         </div>
@@ -81,7 +82,7 @@ export default async function KitchenPage({
             return (
               <div key={date} className="rounded-none border-2 border-neutral-900 bg-white shadow-[4px_4px_0_#111]">
                 <div className="border-b-2 border-neutral-900 bg-orange-200 px-4 py-2 text-sm font-extrabold uppercase tracking-wide">
-                  {new Date(date).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short" })}
+                  {formatIstDate(date, { weekday: "long", day: "numeric", month: "short" })}
                 </div>
                 <div className="divide-y-2 divide-dashed divide-neutral-200">
                   {dayEntries.length === 0 && <p className="p-4 text-sm text-neutral-400">Nothing planned</p>}

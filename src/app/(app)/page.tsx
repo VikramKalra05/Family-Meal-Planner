@@ -5,6 +5,9 @@ import { QuickLogForm } from "./progress/weight-forms";
 import { AiLogForm, CravingForm } from "./today-forms";
 import { setEntryStatusAction } from "./week/actions";
 import { mondayOf } from "@/lib/planner";
+import { formatIstDate, istDateISO } from "@/lib/date";
+import { WeighInReminder } from "@/components/weigh-in-reminder";
+import { SubmitButton } from "@/components/submit-button";
 
 export const instant = false;
 
@@ -19,7 +22,7 @@ const SLOT_ORDER = ["breakfast", "lunch", "snack", "dinner"];
 export default async function TodayPage() {
   const profile = await requireFullProfile();
   const supabase = await createClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = istDateISO();
 
   const [householdRes, todayLogRes, latestLogRes, logsRes] = await Promise.all([
     supabase.from("households").select("*").eq("id", profile.household_id!).single(),
@@ -53,16 +56,18 @@ export default async function TodayPage() {
   // Named recipe nutrition comes through the embed
   const myEntriesTyped = (myEntries ?? []).map((e: unknown) => {
     const row = e as {
-      id: string; slot: string; status: string; member_id: string | null;
+      id: string; slot: string; status: string; member_id: string | null; recipe_id: string;
       servings_base: number; member_portions: Record<string, number> | null;
       recipes: { title: string } | { title: string }[] | null;
       recipe_nutrition: { kcal: number } | { kcal: number }[] | null;
     };
     const title = Array.isArray(row.recipes) ? row.recipes[0]?.title : row.recipes?.title;
     const kcalRow = Array.isArray(row.recipe_nutrition) ? row.recipe_nutrition[0] : row.recipe_nutrition;
-    const portion = row.member_portions?.[profile.id] ?? Number(row.servings_base) ?? 1;
+    const portion =
+      row.member_portions?.[profile.id] ?? (row.member_id ? Number(row.servings_base) : 1) ?? 1;
     return {
       id: row.id, slot: row.slot, status: row.status, title: title ?? "Recipe",
+      recipeId: row.recipe_id,
       kcal: kcalRow ? Math.round(Number(kcalRow.kcal) * portion) : null,
     };
   });
@@ -73,12 +78,13 @@ export default async function TodayPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
+      <WeighInReminder weighInTime={profile.weigh_in_time} />
       <section className="rounded-none border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0_#111]">
         <h1 className="text-lg font-extrabold uppercase tracking-tight">
           Namaste, {profile.display_name} 👋
         </h1>
         <p className="mt-1 text-sm text-neutral-500">
-          {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}
+          {formatIstDate(new Date())}
         </p>
       </section>
 
@@ -163,12 +169,12 @@ export default async function TodayPage() {
                   {slot === "dinner" ? " · shared" : ""}
                 </p>
                 {entry ? (
-                  <>
-                    <Link href={`/recipes/${entry.title ? "" : ""}`} className="hidden" aria-hidden />
-                    <p className="truncate text-sm font-bold">
-                      {entry.title} {entry.kcal != null && <span className="font-medium text-neutral-500">· {Math.round(entry.kcal)} kcal</span>}
-                    </p>
-                  </>
+                  <p className="truncate text-sm font-bold">
+                    <Link href={`/recipes/${entry.recipeId}`} className="hover:underline">
+                      {entry.title}
+                    </Link>{" "}
+                    {entry.kcal != null && <span className="font-medium text-neutral-500">· {Math.round(entry.kcal)} kcal</span>}
+                  </p>
                 ) : (
                   <p className="text-xs text-neutral-400">
                     Not planned — <Link href="/week" className="underline">generate or swap in the week planner</Link>
@@ -179,9 +185,12 @@ export default async function TodayPage() {
                 <form action={setEntryStatusAction} className="shrink-0">
                   <input type="hidden" name="entryId" value={entry.id} />
                   <input type="hidden" name="status" value="eaten" />
-                  <button className="rounded-none border-2 border-neutral-900 bg-lime-300 px-3 py-2 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none">
+                  <SubmitButton
+                    pendingText="…"
+                    className="rounded-none border-2 border-neutral-900 bg-lime-300 px-3 py-2 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none disabled:opacity-60"
+                  >
                     ✓ Ate it
-                  </button>
+                  </SubmitButton>
                 </form>
               ) : entry ? (
                 <span className="shrink-0 rounded-full border-2 border-neutral-900 bg-lime-300 px-2.5 py-1 text-[10px] font-extrabold uppercase">

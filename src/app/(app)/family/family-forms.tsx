@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { sendMessageAction, type FamilyActionState } from "./actions";
+import { WorkingBar } from "@/components/ai-working";
 
 const input =
   "w-full rounded-none border-2 border-neutral-900 bg-white px-3 py-2 text-sm transition focus:shadow-[3px_3px_0_#111] focus:outline-none";
@@ -18,6 +19,7 @@ export function SendMessageForm({ members }: { members: { id: string; name: stri
     <form
       key={state.ok ?? "new"}
       action={action}
+      aria-busy={pending}
       className="space-y-2.5"
     >
       <div className="grid gap-2.5 sm:grid-cols-2">
@@ -48,8 +50,9 @@ export function SendMessageForm({ members }: { members: { id: string; name: stri
       </div>
       {state.error && <p className="text-xs font-bold text-red-600">{state.error}</p>}
       {state.ok && <p className="text-xs font-bold text-emerald-700">{state.ok}</p>}
-      <button type="submit" disabled={pending} className={`${primary} w-full`}>
-        {pending ? "Sending…" : "Send"}
+      {pending && <WorkingBar label="Sending to the family board…" />}
+      <button type="submit" disabled={pending} className={`${primary} w-full ${pending ? "nb-loading cursor-wait" : ""}`}>
+        {pending ? "◌ Sending…" : "Send"}
       </button>
     </form>
   );

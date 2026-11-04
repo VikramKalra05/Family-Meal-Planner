@@ -67,6 +67,14 @@ export async function saveProfile(_prev: ActionState, formData: FormData): Promi
     .map((a) => a.trim().toLowerCase())
     .filter(Boolean);
 
+  // Keep the engine-version stamp monotonic so Settings can tell users when
+  // targets changed; the previous code reset it to 1 on every edit.
+  const { data: current } = await supabase
+    .from("profiles")
+    .select("targets_version")
+    .eq("id", user.id)
+    .maybeSingle();
+
   const { error } = await supabase.from("profiles").upsert({
     id: user.id,
     display_name: v.displayName,
@@ -82,7 +90,7 @@ export async function saveProfile(_prev: ActionState, formData: FormData): Promi
     target_weight_kg: v.targetWeightKg ?? null,
     weigh_in_time: v.weighInTime ?? null,
     targets_cache: { targets, breakdown },
-    targets_version: 1,
+    targets_version: (current?.targets_version ?? 0) + 1,
   });
 
   if (error) return { error: error.message };

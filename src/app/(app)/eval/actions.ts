@@ -26,7 +26,7 @@ export async function runEvalAction(): Promise<{ error: string } | { result: Eva
   if (profile.role !== "owner") return { error: "Owner only" };
 
   const supabase = await createClient();
-  const { plannerRecipes, members } = await loadPlanData();
+  const { plannerRecipes, members } = await loadPlanData(profile);
   if (plannerRecipes.length === 0 || members.length === 0) {
     return { error: "Need at least one rated recipe and one member with targets." };
   }

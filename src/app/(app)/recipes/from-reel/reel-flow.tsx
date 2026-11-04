@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { draftRecipeFromUrl, importDraftRecipe, type DraftResult } from "./actions";
 import type { DraftRecipe } from "@/lib/ai/recipes";
+import { AiWorking } from "@/components/ai-working";
 
 const input =
   "w-full rounded-none border-2 border-neutral-900 bg-white px-3.5 py-2.5 text-sm transition focus:shadow-[3px_3px_0_#111] focus:outline-none";
@@ -20,6 +21,7 @@ export function ReelFlow({ initialUrl = "" }: { initialUrl?: string }) {
   const [needsCaption, setNeedsCaption] = useState(false);
   const [drafting, startDrafting] = useTransition();
   const [saving, startSaving] = useTransition();
+  const [saved, setSaved] = useState(false);
 
   function runDraft() {
     setError(null);
@@ -48,19 +50,24 @@ export function ReelFlow({ initialUrl = "" }: { initialUrl?: string }) {
         setError(res.error);
         return;
       }
+      setSaved(true);
       router.push(`/recipes/${res.id}`);
     });
   }
 
   if (!draft) {
     return (
-      <div className="space-y-4 rounded-none bg-white p-6 border-2 border-neutral-900 shadow-[4px_4px_0_#111]">
+      <div
+        aria-busy={drafting}
+        className="space-y-4 rounded-none bg-white p-6 border-2 border-neutral-900 shadow-[4px_4px_0_#111]"
+      >
         <div>
           <label className={label} htmlFor="url">Recipe link</label>
           <input
             id="url" value={url} onChange={(e) => setUrl(e.target.value)}
+            disabled={drafting}
             placeholder="https://www.instagram.com/reel/… or https://youtube.com/shorts/…"
-            className={`${input} font-mono text-xs`}
+            className={`${input} font-mono text-xs disabled:bg-neutral-100 disabled:text-neutral-400`}
           />
           <p className="mt-1 text-[11px] text-neutral-400">
             Android tip: once installed as a PWA (M6), share the reel straight from Instagram into this app.
@@ -72,8 +79,9 @@ export function ReelFlow({ initialUrl = "" }: { initialUrl?: string }) {
             <label className={label} htmlFor="caption">Caption / recipe text (fallback when the link is private)</label>
             <textarea
               id="caption" rows={6} value={caption} onChange={(e) => setCaption(e.target.value)}
+              disabled={drafting}
               placeholder="Paste the reel caption or the ingredients + steps here…"
-              className={`${input} text-xs`}
+              className={`${input} text-xs disabled:bg-neutral-100 disabled:text-neutral-400`}
             />
           </div>
         )}
@@ -94,17 +102,28 @@ export function ReelFlow({ initialUrl = "" }: { initialUrl?: string }) {
         {error && <p className="rounded-none bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{error}</p>}
 
         <button
-          type="button" onClick={runDraft} disabled={drafting || !url.trim()}
-          className="w-full rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide disabled:opacity-50"
+          type="button"
+          onClick={runDraft}
+          disabled={drafting || !url.trim()}
+          className={`w-full rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide disabled:opacity-60 ${
+            drafting ? "nb-loading cursor-wait" : ""
+          }`}
         >
-          {drafting ? (needsCaption ? "Drafting from your text…" : "Reading the recipe…") : "✨ Draft recipe with AI"}
+          {drafting ? "◌ Drafting…" : "✨ Draft recipe with AI"}
         </button>
+
+        {drafting && (
+          <AiWorking
+            label={caption.trim() ? "Reading your caption…" : "Fetching the link and reading it…"}
+            hint="The app fetches the public page, then the AI extracts the dish, ingredients and steps. Instagram often blocks this — if it fails, paste the caption and draft again. Usually 10–40 seconds."
+          />
+        )}
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <fieldset disabled={saving || saved} className="min-w-0 space-y-4 border-0 p-0">
       <div className="rounded-none border-2 border-neutral-900 bg-lime-200 p-4 text-xs font-medium text-neutral-900 shadow-[3px_3px_0_#111]">
         Review the AI&apos;s draft — edit anything that looks wrong, then save. Unknown ingredients get their
         nutrition estimated automatically (marked on the recipe).
@@ -211,20 +230,37 @@ export function ReelFlow({ initialUrl = "" }: { initialUrl?: string }) {
 
       {error && <p className="rounded-none bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{error}</p>}
 
+      {(saving || saved) && (
+        <AiWorking
+          label={saved ? "Saved — opening the recipe…" : "Saving and matching ingredients…"}
+          hint={
+            saved
+              ? "Navigation can take a moment while the recipe page renders."
+              : "Unknown ingredients are estimated with AI, then nutrition is computed for the whole dish. Usually 5–30 seconds."
+          }
+        />
+      )}
+
       <div className="flex gap-3">
         <button
-          type="button" onClick={saveDraft} disabled={saving}
-          className="flex-1 rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide disabled:opacity-50"
+          type="button"
+          onClick={saveDraft}
+          disabled={saving || saved}
+          className={`flex-1 rounded-none bg-emerald-400 text-neutral-900 border-2 border-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none font-extrabold uppercase tracking-wide disabled:opacity-60 ${
+            saving || saved ? "nb-loading cursor-wait" : ""
+          }`}
         >
-          {saving ? "Saving — matching ingredients…" : "Save as recipe"}
+          {saved ? "◌ Opening…" : saving ? "◌ Saving — matching ingredients…" : "Save as recipe"}
         </button>
         <button
-          type="button" onClick={() => { setDraft(null); setError(null); }}
-          className="rounded-none border-2 border-neutral-900 px-4 py-3 text-sm font-medium text-neutral-600 hover:bg-amber-50"
+          type="button"
+          onClick={() => { setDraft(null); setError(null); }}
+          disabled={saving || saved}
+          className="rounded-none border-2 border-neutral-900 px-4 py-3 text-sm font-medium text-neutral-600 hover:bg-amber-50 disabled:opacity-60"
         >
           Discard draft
         </button>
       </div>
-    </div>
+    </fieldset>
   );
 }

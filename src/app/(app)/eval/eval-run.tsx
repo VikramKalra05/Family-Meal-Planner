@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { runEvalAction, type EvalResult } from "./actions";
+import { AiWorking } from "@/components/ai-working";
 
 export function EvalRun() {
   const [result, setResult] = useState<EvalResult | null>(null);
@@ -9,7 +10,7 @@ export function EvalRun() {
   const [running, start] = useTransition();
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" aria-busy={running}>
       <button
         type="button"
         disabled={running}
@@ -21,15 +22,24 @@ export function EvalRun() {
             else setResult(res.result);
           });
         }}
-        className="rounded-none border-2 border-neutral-900 bg-emerald-400 px-5 py-3 text-sm font-extrabold uppercase tracking-wide text-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] disabled:opacity-50"
+        className={`rounded-none border-2 border-neutral-900 bg-emerald-400 px-5 py-3 text-sm font-extrabold uppercase tracking-wide text-neutral-900 shadow-[3px_3px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_#111] disabled:opacity-60 ${
+          running ? "nb-loading cursor-wait" : ""
+        }`}
       >
-        {running ? "Running 5 generations…" : "▶ Run E1 + E4 (5 plan generations)"}
+        {running ? "◌ Running 5 generations…" : "▶ Run E1 + E4 (5 plan generations)"}
       </button>
+
+      {running && (
+        <AiWorking
+          label="Running the evaluation…"
+          hint="The deterministic engine generates five weeks and checks calorie gaps and constraint violations. No AI calls."
+        />
+      )}
 
       {error && <p className="text-sm font-bold text-red-600">{error}</p>}
 
       {result && (
-        <div className="space-y-3">
+        <div className="nb-stamp space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="border-2 border-neutral-900 bg-lime-200 p-4 shadow-[3px_3px_0_#111]">
               <p className="text-[10px] font-extrabold uppercase tracking-widest text-neutral-600">E1 · mean kcal gap</p>
