@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { requireFullProfile } from "@/lib/profile";
 import type { Recipe, RecipeNutrition } from "@/lib/db-types";
 import { RecipesBrowser, type RecipeCardData } from "./recipes-browser";
 
@@ -12,6 +13,7 @@ interface Row extends Recipe {
 }
 
 export default async function RecipesPage() {
+  await requireFullProfile();
   const supabase = await createClient();
 
   const { data: recipes, error } = await supabase

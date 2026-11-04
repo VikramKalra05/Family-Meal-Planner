@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { requireFullProfile } from "@/lib/profile";
 import { defaultUnitFor } from "@/lib/food";
 import { BackLink } from "@/components/back-link";
 import { createRecipe, createCustomIngredientOption, estimateIngredientAction } from "../actions";
@@ -8,6 +9,7 @@ import type { IngredientOption } from "../types";
 export const instant = false;
 
 export default async function NewRecipePage() {
+  await requireFullProfile();
   const supabase = await createClient();
   const { data: ingredients } = await supabase
     .from("ingredients")

@@ -1,4 +1,5 @@
 import { BackLink } from "@/components/back-link";
+import { requireFullProfile } from "@/lib/profile";
 import { ReelFlow } from "./reel-flow";
 
 export const instant = false;
@@ -8,6 +9,7 @@ export default async function FromReelPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  await requireFullProfile();
   const params = await searchParams;
   // PWA share target drops the shared reel here (url and/or text).
   const sharedUrl = typeof params.url === "string" ? params.url : "";
