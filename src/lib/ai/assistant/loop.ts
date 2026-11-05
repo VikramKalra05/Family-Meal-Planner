@@ -46,6 +46,8 @@ export interface AssistantTurnResult {
   stopped?: boolean;
   /** The conversation this turn belongs to (created if it was a new chat). */
   conversationId: string | null;
+  /** "label · model" of the provider that answered, for per-reply captions. */
+  modelLabel: string;
 }
 
 // ── Thread persistence ──────────────────────────────────────────────────────
@@ -57,6 +59,7 @@ interface StoredMessage {
     tools?: string[];
     proposal?: { action: AssistantAction; summary: string } | null;
     kind?: string;
+    model?: string;
   } | null;
   created_at: string;
 }
@@ -209,7 +212,7 @@ export async function runAssistantTurn(
   // skip any assistant reply, and tell the client.
   const returnStopped = async (conv: string | null): Promise<AssistantTurnResult> => {
     await persistMessage(profile.id, "system", "⏹ Stopped — the partial answer was discarded.", { kind: "stopped" }, conv);
-    return { reply: "", toolTrace: [], proposal: null, error: null, stopped: true, conversationId: conv };
+    return { reply: "", toolTrace: [], proposal: null, error: null, stopped: true, conversationId: conv, modelLabel: "" };
   };
 
   const conversation = await ensureConversation(profile.id, conversationId, userText);
@@ -246,7 +249,7 @@ export async function runAssistantTurn(
           ? e.message
           : "Rasoi AI hit a snag thinking — try again in a moment.";
       await persistMessage(profile.id, "system", `error: ${error}`, { kind: "error" }, conversation);
-      return { reply: "", toolTrace, proposal: null, error, conversationId: conversation };
+      return { reply: "", toolTrace: [], proposal: null, error, conversationId: conversation, modelLabel: "" };
     }
 
     const actions = turn.actions ?? [];
@@ -254,13 +257,15 @@ export async function runAssistantTurn(
 
     if (mutation) {
       const proposal: AssistantProposal = { action: mutation, summary: summarizeAction(mutation) };
-      await persistMessage(profile.id, "assistant", turn.reply, { tools: toolTrace, proposal }, conversation);
-      return { reply: turn.reply, toolTrace, proposal, error: null, conversationId: conversation ?? null };
+      const modelLabel = `${provider.label} · ${provider.model}`;
+      await persistMessage(profile.id, "assistant", turn.reply, { tools: toolTrace, proposal, model: modelLabel }, conversation);
+      return { reply: turn.reply, toolTrace, proposal, error: null, conversationId: conversation ?? null, modelLabel };
     }
 
     if (actions.length === 0) {
-      await persistMessage(profile.id, "assistant", turn.reply, { tools: toolTrace }, conversation);
-      return { reply: turn.reply, toolTrace, proposal: null, error: null, conversationId: conversation ?? null };
+      const modelLabel = `${provider.label} · ${provider.model}`;
+      await persistMessage(profile.id, "assistant", turn.reply, { tools: toolTrace, model: modelLabel }, conversation);
+      return { reply: turn.reply, toolTrace, proposal: null, error: null, conversationId: conversation ?? null, modelLabel };
     }
 
     // Reads: execute all, feed results back, loop again for the final answer.
@@ -289,13 +294,15 @@ export async function runAssistantTurn(
       temperature: 0.3,
       feature: "assistant",
     });
-    await persistMessage(profile.id, "assistant", finalTurn.reply, { tools: toolTrace }, conversation);
-    return { reply: finalTurn.reply, toolTrace, proposal: null, error: null, conversationId: conversation ?? null };
+    const modelLabel = `${provider.label} · ${provider.model}`;
+    await persistMessage(profile.id, "assistant", finalTurn.reply, { tools: toolTrace, model: modelLabel }, conversation);
+    return { reply: finalTurn.reply, toolTrace, proposal: null, error: null, conversationId: conversation ?? null, modelLabel };
   } catch {
     if (signal?.aborted) return await returnStopped(conversation);
     const reply = "I gathered the data but ran out of room to finish the answer — try asking again.";
-    await persistMessage(profile.id, "assistant", reply, { tools: toolTrace }, conversation);
-    return { reply, toolTrace, proposal: null, error: null, conversationId: conversation };
+    const modelLabel = `${provider.label} · ${provider.model}`;
+    await persistMessage(profile.id, "assistant", reply, { tools: toolTrace, model: modelLabel }, conversation);
+    return { reply, toolTrace, proposal: null, error: null, conversationId: conversation, modelLabel };
   }
 }
 

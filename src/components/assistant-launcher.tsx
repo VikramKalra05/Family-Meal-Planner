@@ -71,6 +71,8 @@ interface PanelMessage {
   proposal?: Proposal | null;
   /** For mutation proposals: where the confirm flow stands. */
   state?: "pending" | "confirmed" | "cancelled";
+  /** "label · model" caption — which brain answered this reply. */
+  modelVia?: string;
 }
 
 type Busy = { kind: "thinking" } | { kind: "confirming"; messageKey: string } | null;
@@ -133,8 +135,9 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
   /** Alias → real name, for display only. Never sent to the AI provider. */
   const [memberMap, setMemberMap] = useState<Record<string, string>>({});
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [modelOpen, setModelOpen] = useState(false);
   const [favBusy, setFavBusy] = useState<string | null>(null);
+  /** "chat" = conversation; "models" = full-panel model picker. */
+  const [view, setView] = useState<"chat" | "models">("chat");
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
@@ -144,27 +147,26 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   /** Aborts the in-flight turn (Stop button). */
   const stopRef = useRef<AbortController | null>(null);
-  const modelBoxRef = useRef<HTMLDivElement>(null);
   const chatsBoxRef = useRef<HTMLDivElement>(null);
-  // Ref mirrors so the single Esc/click-outside handlers know popover order
+  // Ref mirrors so the single Esc/click-outside handlers know layer order
   // without re-subscribing on every state change.
-  const modelOpenRef = useRef(false);
   const historyOpenRef = useRef(false);
-  function setModelOpenSafe(v: boolean) {
-    modelOpenRef.current = v;
-    setModelOpen(v);
-  }
+  const viewRef = useRef<"chat" | "models">("chat");
   function setHistoryOpenSafe(v: boolean) {
     historyOpenRef.current = v;
     setHistoryOpen(v);
+  }
+  function setViewSafe(v: "chat" | "models") {
+    viewRef.current = v;
+    setView(v);
   }
 
   // Esc closes popovers first, then the panel.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        if (modelOpenRef.current) {
-          setModelOpenSafe(false);
+        if (viewRef.current === "models") {
+          setViewSafe("chat");
           return;
         }
         if (historyOpenRef.current) {
@@ -182,7 +184,6 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     function onDocMouseDown(e: MouseEvent) {
       const t = e.target as Node;
-      if (modelOpenRef.current && modelBoxRef.current && !modelBoxRef.current.contains(t)) setModelOpenSafe(false);
       if (historyOpenRef.current && chatsBoxRef.current && !chatsBoxRef.current.contains(t)) setHistoryOpenSafe(false);
     }
     document.addEventListener("mousedown", onDocMouseDown);
@@ -234,6 +235,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
                 content: m.content,
                 tools: m.meta?.tools ?? undefined,
                 proposal: m.meta?.proposal ?? null,
+                modelVia: m.meta?.model ?? undefined,
                 state: m.meta?.proposal ? "confirmed" : undefined,
               })),
             );
@@ -279,6 +281,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           error?: string;
           stopped?: boolean;
           conversationId?: string | null;
+          modelLabel?: string;
         };
         if (data.conversationId) {
           const newId = data.conversationId;
@@ -300,6 +303,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
               content: data.reply ?? "",
               tools: data.toolTrace?.length ? data.toolTrace : undefined,
               proposal: data.proposal ?? null,
+              modelVia: data.modelLabel ?? undefined,
               state: data.proposal ? "pending" : undefined,
             },
           ]);
@@ -373,6 +377,23 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
 
   const currentPair = modelPairs.find((o) => o.key === selectedModelKey) ?? null;
 
+  /** Picks a model, notes the switch in the thread, and returns to the chat. */
+  function switchPair(key: string) {
+    const pair = modelPairs.find((o) => o.key === key);
+    setSelectedModelKey(key);
+    if (pair) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          key: `sw${Date.now()}`,
+          role: "system",
+          content: `⇄ Model switched → ${pair.isFavorite ? "⭐ " : ""}${pair.label} · ${pair.model}`,
+        },
+      ]);
+    }
+    setViewSafe("chat");
+  }
+
   /** Stars/unstars a (provider, model) pair straight from the chat dropdown. */
   function toggleFavoritePair(pair: ModelPair) {
     const nextFav = !pair.isFavorite;
@@ -445,82 +466,22 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
               <AiSpark size={16} /> Rasoi AI
             </p>
             {modelPairs.length >= 1 ? (
-              <div className="relative mt-1 w-full max-w-[210px]" ref={modelBoxRef}>
-                <button
-                  type="button"
-                  onClick={() => setModelOpenSafe(!modelOpenRef.current)}
-                  aria-expanded={modelOpen}
-                  aria-haspopup="listbox"
-                  aria-label="Model for this conversation"
-                  title="Model for this conversation — your app-wide default in Settings is untouched"
-                  className="flex w-full items-center justify-between gap-1 rounded-none border-2 border-neutral-900 bg-white px-1.5 py-1 text-left text-[10px] font-bold text-neutral-900 shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
-                >
-                  <span className="truncate">
-                    {currentPair?.isFavorite ? "⭐ " : currentPair?.is_default ? "★ " : ""}
-                    {currentPair ? currentPair.model : "Model"}
-                  </span>
-                  <span className="text-neutral-400" aria-hidden>
-                    ▾
-                  </span>
-                </button>
-                {modelOpen && (
-                  <div
-                    role="listbox"
-                    aria-label="Available models"
-                    className="absolute left-0 right-0 top-full z-20 mt-1 border-2 border-neutral-900 bg-white shadow-[4px_4px_0_#111]"
-                  >
-                    <p className="border-b border-neutral-200 px-2 py-1 text-[9px] font-extrabold uppercase tracking-widest text-neutral-400">
-                      Models — ⭐ pins it on top
-                    </p>
-                    <div className="max-h-64 overflow-y-auto">
-                      {modelPairs.map((o) => (
-                        <div key={o.key} className={`flex items-stretch ${o.isFavorite ? "bg-amber-50" : ""}`}>
-                          <button
-                            type="button"
-                            role="option"
-                            aria-selected={o.key === selectedModelKey}
-                            onClick={() => {
-                              setSelectedModelKey(o.key);
-                              setModelOpenSafe(false);
-                            }}
-                            className={`min-w-0 flex-1 px-2 py-1.5 text-left transition-colors hover:bg-amber-50 ${
-                              o.key === selectedModelKey ? "bg-yellow-300" : ""
-                            }`}
-                          >
-                            <span className="block truncate text-[11px] font-bold text-neutral-900">
-                              {o.isFavorite ? "⭐ " : ""}
-                              {o.model}
-                            </span>
-                            <span className="block truncate text-[9px] text-neutral-400">
-                              {o.label}
-                              {o.is_default ? " · default" : ""}
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => toggleFavoritePair(o)}
-                            disabled={favBusy === o.key}
-                            aria-label={o.isFavorite ? `Unstar ${o.model}` : `Star ${o.model}`}
-                            title={o.isFavorite ? "Unstar" : "Star — pins to top"}
-                            className={`w-9 text-center text-sm transition-colors hover:bg-amber-100 disabled:opacity-40 ${
-                              o.isFavorite ? "text-amber-500" : "text-neutral-300"
-                            }`}
-                          >
-                            {favBusy === o.key ? "◌" : o.isFavorite ? "⭐" : "☆"}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <Link
-                      href="/settings"
-                      onClick={onClose}
-                      className="block border-t border-neutral-200 px-2 py-1.5 text-[9px] font-extrabold uppercase tracking-wide text-emerald-700 hover:bg-amber-50"
-                    >
-                      ⚙ Add or edit providers
-                    </Link>
-                  </div>
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={() => setViewSafe("models")}
+                aria-haspopup="dialog"
+                aria-label="Model for this conversation"
+                title="Choose a model — your app-wide default in Settings is untouched"
+                className="mt-1 flex w-full max-w-[210px] items-center justify-between gap-1 rounded-none border-2 border-neutral-900 bg-white px-1.5 py-1 text-left text-[10px] font-bold text-neutral-900 shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+              >
+                <span className="truncate">
+                  {currentPair?.isFavorite ? "⭐ " : currentPair?.is_default ? "★ " : ""}
+                  {currentPair ? currentPair.model : "Model"}
+                </span>
+                <span className="text-neutral-400" aria-hidden>
+                  ▾
+                </span>
+              </button>
             ) : (
               <p className="text-[10px] text-neutral-700">
                 {provider ? `via ${provider.label} · ${provider.model}` : "your kitchen copilot"}
@@ -534,7 +495,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
                 setConversationId(null);
                 setMessages([]);
                 setHistoryOpenSafe(false);
-                setModelOpenSafe(false);
+                setViewSafe("chat");
                 setError(null);
               }}
               title="Start a fresh conversation"
@@ -595,6 +556,18 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
+        {view === "models" ? (
+          <ModelsView
+            pairs={modelPairs}
+            selectedKey={selectedModelKey}
+            onSelect={switchPair}
+            onToggleStar={toggleFavoritePair}
+            favBusy={favBusy}
+            onBack={() => setViewSafe("chat")}
+            onClose={onClose}
+          />
+        ) : (
+        <>
         {/* Thread */}
         <div className="flex-1 space-y-3 overflow-y-auto bg-[#FFFBEF] px-3 py-4">
           {historyError && (
@@ -685,6 +658,9 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
                     <div className="nb-stamp border-2 border-neutral-900 bg-white px-3 py-2 text-xs leading-relaxed text-neutral-900 shadow-[2px_2px_0_#111]">
                       {deAlias(m.content)}
                     </div>
+                  )}
+                  {m.modelVia && (
+                    <p className="pl-1 text-[9px] font-medium text-neutral-400">via {m.modelVia}</p>
                   )}
                   {m.proposal && (
                     <div className="border-2 border-neutral-900 bg-amber-100 p-3 shadow-[3px_3px_0_#111]">
@@ -779,6 +755,8 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
             Enter to send · Shift+Enter for a new line · every change asks first
           </p>
         </form>
+        </>
+        )}
       </section>
     </>
   );
@@ -792,6 +770,131 @@ interface StoredRow {
     tools?: string[];
     proposal?: Proposal | null;
     kind?: string;
+    model?: string;
   } | null;
   created_at: string;
+}
+
+/**
+ * Full-panel model picker: search, favorites pinned in their own group, the
+ * rest grouped by provider. Replaces the cramped header popover.
+ */
+function ModelsView({
+  pairs,
+  selectedKey,
+  onSelect,
+  onToggleStar,
+  favBusy,
+  onBack,
+  onClose,
+}: {
+  pairs: ModelPair[];
+  selectedKey: string;
+  onSelect: (key: string) => void;
+  onToggleStar: (pair: ModelPair) => void;
+  favBusy: string | null;
+  onBack: () => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const filtered = pairs.filter(
+    (o) => !q || o.model.toLowerCase().includes(q) || o.label.toLowerCase().includes(q),
+  );
+  const favorites = filtered.filter((o) => o.isFavorite);
+  const groups: { label: string; isDefault: boolean; items: ModelPair[] }[] = [];
+  for (const o of filtered.filter((x) => !x.isFavorite)) {
+    const last = groups[groups.length - 1];
+    if (last && last.label === o.label) last.items.push(o);
+    else groups.push({ label: o.label, isDefault: o.is_default, items: [o] });
+  }
+
+  const row = (o: ModelPair) => (
+    <div key={o.key} className={`flex items-stretch ${o.key === selectedKey ? "bg-yellow-300" : ""}`}>
+      <button
+        type="button"
+        onClick={() => onSelect(o.key)}
+        className="min-w-0 flex-1 px-3 py-2 text-left transition-colors hover:bg-amber-50"
+      >
+        <span className="block truncate text-xs font-bold text-neutral-900">
+          {o.isFavorite ? "⭐ " : ""}
+          {o.model}
+        </span>
+        <span className="block truncate text-[9px] text-neutral-400">
+          {o.label}
+          {o.is_default ? " · default provider" : ""}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onToggleStar(o)}
+        disabled={favBusy === o.key}
+        aria-label={o.isFavorite ? `Unstar ${o.model}` : `Star ${o.model} — pins to top`}
+        title={o.isFavorite ? "Unstar" : "Star — pins to top"}
+        className={`w-10 text-center text-base transition-colors hover:bg-amber-100 disabled:opacity-40 ${
+          o.isFavorite ? "text-amber-500" : "text-neutral-300"
+        }`}
+      >
+        {favBusy === o.key ? "◌" : o.isFavorite ? "⭐" : "☆"}
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-[#FFFBEF]">
+      <div className="flex items-center gap-2 border-b-2 border-neutral-900 bg-white px-3 py-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="rounded-none border-2 border-neutral-900 bg-white px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+        >
+          ← Back
+        </button>
+        <p className="text-xs font-extrabold uppercase tracking-wide text-neutral-900">Choose a model</p>
+      </div>
+      <div className="border-b-2 border-neutral-900 bg-white p-2">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search models…"
+          aria-label="Search models"
+          className="w-full rounded-none border-2 border-neutral-900 bg-white px-2.5 py-1.5 text-xs focus:shadow-[3px_3px_0_#111] focus:outline-none"
+        />
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {pairs.length === 0 && (
+          <p className="p-4 text-xs text-neutral-500">
+            No models yet — add a provider in Settings and ⚡ Fetch its catalog.
+          </p>
+        )}
+        {favorites.length > 0 && (
+          <>
+            <p className="border-y border-neutral-200 bg-neutral-50 px-3 py-1 text-[9px] font-extrabold uppercase tracking-widest text-neutral-400">
+              ⭐ Favorites
+            </p>
+            {favorites.map(row)}
+          </>
+        )}
+        {groups.map((g) => (
+          <div key={g.label}>
+            <p className="border-y border-neutral-200 bg-neutral-50 px-3 py-1 text-[9px] font-extrabold uppercase tracking-widest text-neutral-400">
+              {g.label}
+              {g.isDefault ? " · ★ default" : ""}
+            </p>
+            {g.items.map(row)}
+          </div>
+        ))}
+        {pairs.length > 0 && favorites.length === 0 && groups.length === 0 && (
+          <p className="p-4 text-xs text-neutral-500">No models match “{query}”.</p>
+        )}
+      </div>
+      <Link
+        href="/settings"
+        onClick={onClose}
+        className="border-t-2 border-neutral-900 bg-white px-3 py-2 text-[10px] font-extrabold uppercase tracking-wide text-emerald-700 hover:bg-amber-50"
+      >
+        ⚙ Manage providers &amp; catalogs
+      </Link>
+    </div>
+  );
 }

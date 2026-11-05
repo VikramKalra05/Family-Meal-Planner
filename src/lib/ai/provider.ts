@@ -149,9 +149,16 @@ export async function chatComplete(
         throw new ProviderError("Provider rate limit hit — try again in a moment.");
       }
       // Some OpenAI-compatible endpoints reject response_format entirely —
-      // retry the same request without it before giving up.
-      if (res.status === 400 && opts.json && body.includes("response_format")) {
+      // gateways phrase it in their own words ("not yet supported by atlas"),
+      // so match both. Retrying without JSON mode is always safe: the caller
+      // just falls back to looser parsing.
+      if (res.status === 400 && opts.json && /response_format|not yet supported|json_schema/i.test(body)) {
         return chatComplete(provider, messages, { ...opts, json: false });
+      }
+      if (res.status === 400 && /unavailable/i.test(body)) {
+        throw new ProviderError(
+          "That model is currently unavailable on this provider — switch models from the ✨ dropdown and try again.",
+        );
       }
       throw new ProviderError(`Provider error ${res.status}: ${body.slice(0, 300)}`);
     }
