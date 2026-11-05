@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { getProfile } from "@/lib/profile";
 import { AppNav } from "@/components/app-nav";
 import { SubmitButton } from "@/components/submit-button";
+import { AssistantLauncher } from "@/components/assistant-launcher";
 import { signOut } from "@/app/auth/actions";
 
 /**
@@ -21,6 +22,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
               <ProfileHeading />
             </Suspense>
           </div>
+          <AssistantLauncher />
           <form action={signOut}>
             <SubmitButton
               pendingText="Signing out…"

@@ -107,3 +107,17 @@ Required env (already in `.env.local` locally): `NEXT_PUBLIC_VAPID_PUBLIC_KEY`
 plus `SUPABASE_SERVICE_ROLE_KEY` for the scheduler. Reminder cadence logic is
 pure and unit-tested in `src/lib/push.ts`. Test any device with the
 "🔔 Test push" button on the Today dashboard.
+
+## Rasoi AI — in-app assistant (✨ header button)
+
+A Gemini-style side panel that can answer questions about your data **and operate the app**.
+Every mutation (log meal/weight, add a recipe from a text description, regenerate the week, swap
+a dish, pantry, shopping list, family messages, reminders) shows a confirmation card first; the
+confirmed action is re-validated server-side against the same zod whitelist before it executes.
+Reads (plan, intake, recipes, pantry, weight, usage…) run automatically to ground answers.
+
+- Architecture: closed action-enum protocol over `chatJson` (portable to any BYO OpenAI-compatible
+  provider), tool loop in `src/lib/ai/assistant/`, endpoints `POST /api/ai/chat` + `/api/ai/chat/act`.
+- History persists in `ai_chat_messages` (migration `0010_ai_chat.sql`, append-only RLS).
+- Every model call lands in the usage ledger with feature `assistant` (see `/settings/usage`).
+- Rate limit: 20 questions/hour, 30 confirmations/hour. Requires an AI provider key in Settings.
