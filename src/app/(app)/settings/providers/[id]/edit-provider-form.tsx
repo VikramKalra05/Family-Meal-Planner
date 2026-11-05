@@ -12,13 +12,22 @@ const label = "mb-1.5 block text-xs font-semibold uppercase tracking-wide text-n
 export function EditProviderForm({
   provider,
 }: {
-  provider: { id: string; label: string; base_url: string; model: string; is_default: boolean; models: string[] | null };
+  provider: {
+    id: string;
+    label: string;
+    base_url: string;
+    model: string;
+    is_default: boolean;
+    models: string[] | null;
+    favorite_models: string[] | null;
+  };
 }) {
   const [state, action, pending] = useActionState<ProviderActionState, FormData>(updateAiProvider, {
     error: null,
     ok: null,
   });
   const [modelsJson, setModelsJson] = useState(JSON.stringify(provider.models ?? []));
+  const [favoritesJson, setFavoritesJson] = useState(JSON.stringify(provider.favorite_models ?? []));
   const [baseUrl, setBaseUrl] = useState(provider.base_url);
   const [model, setModel] = useState(provider.model);
   const [apiKey, setApiKey] = useState("");
@@ -80,8 +89,11 @@ export function EditProviderForm({
         getCredentials={() => ({ base_url: baseUrl, api_key: apiKey, provider_id: provider.id })}
         initialModels={provider.models ?? []}
         onModelsChange={(models: string[]) => setModelsJson(JSON.stringify(models))}
+        initialFavorites={provider.favorite_models ?? []}
+        onFavoritesChange={(models: string[]) => setFavoritesJson(JSON.stringify(models))}
       />
       <input type="hidden" name="models_json" value={modelsJson} />
+      <input type="hidden" name="favorite_models_json" value={favoritesJson} />
 
       <div>
         <label className={label} htmlFor="api_key">Replace API key (optional)</label>

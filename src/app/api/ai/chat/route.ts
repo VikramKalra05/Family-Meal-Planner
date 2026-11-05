@@ -23,7 +23,7 @@ export async function GET(req: Request) {
     resolveProvider(),
     supabase
       .from("ai_providers")
-      .select("id, label, model, models, is_default")
+      .select("id, label, model, models, favorite_models, is_default")
       .eq("user_id", profile.id)
       .order("is_default", { ascending: false })
       .order("created_at"),

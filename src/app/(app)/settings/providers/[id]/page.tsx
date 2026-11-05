@@ -20,7 +20,7 @@ export default async function EditProviderPage({
   const supabase = await createClient();
   const { data: provider } = await supabase
     .from("ai_providers")
-    .select("id, label, base_url, model, models, is_default")
+    .select("id, label, base_url, model, models, favorite_models, is_default")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -45,6 +45,7 @@ export default async function EditProviderPage({
         model: provider.model,
         is_default: provider.is_default,
         models: Array.isArray(provider.models) ? (provider.models as string[]) : [],
+        favorite_models: Array.isArray(provider.favorite_models) ? (provider.favorite_models as string[]) : [],
       }}
     />
       </div>

@@ -23,6 +23,7 @@ const PRESETS: { name: string; baseUrl: string; model: string }[] = [
 export function AddProviderForm() {
   const [state, action, pending] = useActionState(addAiProvider, { error: null, ok: null });
   const [modelsJson, setModelsJson] = useState("[]");
+  const [favoritesJson, setFavoritesJson] = useState("[]");
   const [preset, setPreset] = useState(0);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testing, startTesting] = useTransition();
@@ -77,8 +78,11 @@ export function AddProviderForm() {
         })}
         initialModels={[]}
         onModelsChange={(models) => setModelsJson(JSON.stringify(models))}
+        initialFavorites={[]}
+        onFavoritesChange={(models) => setFavoritesJson(JSON.stringify(models))}
       />
       <input type="hidden" name="models_json" value={modelsJson} />
+      <input type="hidden" name="favorite_models_json" value={favoritesJson} />
       <div>
         <label className={label} htmlFor="pkey">API key</label>
         <input id="pkey" name="api_key" type="password" required autoComplete="off" className={`${input} font-mono text-xs`} placeholder="sk-…" />

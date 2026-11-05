@@ -28,6 +28,7 @@ interface ProviderOption {
   label: string;
   model: string;
   models?: string[] | null;
+  favorite_models?: string[] | null;
   is_default: boolean;
 }
 
@@ -38,6 +39,7 @@ interface ModelPair {
   model: string;
   label: string;
   is_default: boolean;
+  isFavorite: boolean;
 }
 
 interface ConversationSummary {
@@ -296,15 +298,22 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
 
   // Every (provider, model) pair the member can switch to: the saved catalog
   // when one was fetched, otherwise the provider's default model.
-  const modelPairs: ModelPair[] = providers.flatMap((p) =>
-    (p.models?.length ? p.models : [p.model]).map((m) => ({
-      key: `${p.id}|${m}`,
-      providerId: p.id,
-      model: m,
-      label: p.label,
-      is_default: p.is_default,
-    })),
-  );
+  const modelPairs: ModelPair[] = providers
+    .flatMap((p) => {
+      const offered = p.models?.length ? p.models : [p.model];
+      const favorites = new Set(p.favorite_models ?? []);
+      // Favorites first (saved order), then the rest of the catalog.
+      const ordered = [...offered].sort((a, b) => Number(favorites.has(b)) - Number(favorites.has(a)));
+      return ordered.map((m) => ({
+        key: `${p.id}|${m}`,
+        providerId: p.id,
+        model: m,
+        label: p.label,
+        is_default: p.is_default,
+        isFavorite: favorites.has(m),
+      }));
+    })
+    .sort((a, b) => Number(b.isFavorite) - Number(a.isFavorite));
 
   const threadEmpty = messages.filter((m) => m.role !== "system").length === 0;
 
@@ -338,7 +347,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
               >
                 {modelPairs.map((o) => (
                   <option key={o.key} value={o.key}>
-                    {o.is_default ? "★ " : ""}
+                    {o.isFavorite ? "⭐ " : o.is_default ? "★ " : ""}
                     {o.label} · {o.model}
                   </option>
                 ))}
