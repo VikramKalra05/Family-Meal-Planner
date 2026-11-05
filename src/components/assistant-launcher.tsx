@@ -1,14 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { AiWorking } from "@/components/ai-working";
 
 /**
- * Rasoi AI — the ✨ header button + right-side assistant panel. Fully
- * self-contained: the only integration point is the single
- * `<AssistantLauncher />` line in (app)/layout.tsx. Talks to
- * /api/ai/chat (ask) and /api/ai/chat/act (confirm a mutation proposal).
+ * Rasoi AI — the ✨ header button + the assistant panel. Fully
+ * self-contained: the only integration points are the `<AssistantLauncher />`
+ * line and the `#rasoi-dock` slot in (app)/layout.tsx.
+ *
+ * When open, the panel portals into the dock slot — a flex sibling of the
+ * content column — so on desktop the page RESIZES around the chat instead of
+ * being overlaid, and because the layout stays mounted across page switches
+ * the conversation persists while you browse. On phones it overlays
+ * full-width (the column has nothing to spare), above the bottom nav.
+ * Talks to /api/ai/chat (ask) and /api/ai/chat/act (confirm a mutation).
  */
 
 interface Proposal {
@@ -44,20 +51,29 @@ const SUGGESTIONS = [
 
 export function AssistantLauncher() {
   const [open, setOpen] = useState(false);
+  const [dock, setDock] = useState<HTMLElement | null>(null);
+
+  // Locate the layout's dock slot after mount (client-only — SSR has no DOM).
+  useEffect(() => {
+    const id = window.setTimeout(() => setDock(document.getElementById("rasoi-dock")), 0);
+    return () => window.clearTimeout(id);
+  }, []);
 
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
         title="Rasoi AI — your meal planner assistant"
-        className="mr-2 rounded-none border-2 border-neutral-900 bg-white px-2.5 py-1.5 text-sm font-extrabold shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+        className={`mr-2 rounded-none border-2 border-neutral-900 px-2.5 py-1.5 text-sm font-extrabold shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none ${
+          open ? "bg-yellow-300" : "bg-white"
+        }`}
       >
         ✨
       </button>
-      {open && <AssistantPanel onClose={() => setOpen(false)} />}
+      {open && dock && createPortal(<AssistantPanel onClose={() => setOpen(false)} />, dock)}
     </>
   );
 }
@@ -225,7 +241,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
         role="dialog"
         aria-label="Rasoi AI assistant"
         style={{ animation: "rasoi-slide-in 0.22s cubic-bezier(0.2, 1.1, 0.4, 1) both" }}
-        className="fixed right-0 top-0 bottom-16 z-40 flex w-full max-w-[92vw] flex-col border-l-2 border-neutral-900 bg-white shadow-[-6px_6px_0_#111] sm:w-[400px] md:bottom-0"
+        className="flex w-full flex-col border-l-2 border-neutral-900 bg-white max-md:fixed max-md:bottom-16 max-md:right-0 max-md:top-0 max-md:z-40 max-md:shadow-[-6px_6px_0_#111] md:relative md:h-full md:w-[340px] md:shrink-0 md:shadow-[-6px_0_0_#111] xl:w-[400px]"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b-2 border-neutral-900 bg-yellow-300 px-4 py-3">
