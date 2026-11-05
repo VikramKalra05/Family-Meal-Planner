@@ -33,6 +33,7 @@ export interface Profile {
   budget_daily: number | null;
   target_weight_kg: number | null;
   weigh_in_time: string | null;
+  chat_language: string | null;
   targets_cache: TargetsResult | null;
   targets_version: number;
   created_at: string;

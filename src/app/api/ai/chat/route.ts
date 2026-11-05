@@ -69,6 +69,7 @@ export async function GET(req: Request) {
     provider: providerRes ? { label: providerRes.label, model: providerRes.model } : null,
     providers: providersRes.data ?? [],
     memberMap,
+    chatLanguage: profile.chat_language ?? null,
     conversations,
     activeConversationId,
     messages,

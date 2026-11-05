@@ -5,6 +5,8 @@ import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
 import { AiWorking } from "@/components/ai-working";
+import { saveChatLanguage } from "@/app/(app)/settings/actions";
+import { CHAT_LANGUAGES, chatLanguageLabel } from "@/lib/ai/assistant/languages";
 
 /** Gradient sparkle icon (icons8) — the assistant's mark. */
 function AiSpark({ size = 20, className = "" }: { size?: number; className?: string }) {
@@ -136,10 +138,12 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
   const [memberMap, setMemberMap] = useState<Record<string, string>>({});
   const [historyOpen, setHistoryOpen] = useState(false);
   const [favBusy, setFavBusy] = useState<string | null>(null);
-  /** "chat" = conversation; "models" = full-panel model picker. */
-  const [view, setView] = useState<"chat" | "models">("chat");
+  /** "chat" = conversation; "models" = model picker; "language" = first-run pick. */
+  const [view, setView] = useState<"chat" | "models" | "language">("chat");
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [langBusy, setLangBusy] = useState<string | null>(null);
+  const [langError, setLangError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -148,15 +152,16 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
   /** Aborts the in-flight turn (Stop button). */
   const stopRef = useRef<AbortController | null>(null);
   const chatsBoxRef = useRef<HTMLDivElement>(null);
+  const firstLoadRef = useRef(true);
   // Ref mirrors so the single Esc/click-outside handlers know layer order
   // without re-subscribing on every state change.
   const historyOpenRef = useRef(false);
-  const viewRef = useRef<"chat" | "models">("chat");
+  const viewRef = useRef<"chat" | "models" | "language">("chat");
   function setHistoryOpenSafe(v: boolean) {
     historyOpenRef.current = v;
     setHistoryOpen(v);
   }
-  function setViewSafe(v: "chat" | "models") {
+  function setViewSafe(v: "chat" | "models" | "language") {
     viewRef.current = v;
     setView(v);
   }
@@ -209,6 +214,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           conversations?: ConversationSummary[];
           activeConversationId?: string | null;
           memberMap?: Record<string, string>;
+          chatLanguage?: string | null;
           messages?: StoredRow[];
           historyError?: string | null;
           error?: string;
@@ -216,6 +222,8 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           setProvider(data.provider);
           setHistoryError(data.historyError ?? null);
           if (data.memberMap) setMemberMap(data.memberMap);
+          // First open with no language preference → the one-time picker.
+          if (firstLoadRef.current && data.chatLanguage === null && data.provider) setViewSafe("language");
           if (data.providers) {
             setProviders(data.providers);
             const pairs = (data.providers ?? []).flatMap((p: ProviderOption) =>
@@ -243,7 +251,27 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
         },
       )
       .catch(() => setHistoryError("Could not reach the server — is it up?"))
-      .finally(() => setHistoryLoading(false));
+      .finally(() => {
+        firstLoadRef.current = false;
+        setHistoryLoading(false);
+      });
+  }
+
+  /** First-run: persists the picked reply language and enters the chat. */
+  function pickLanguage(code: string) {
+    setLangBusy(code);
+    setLangError(null);
+    startSend(async () => {
+      const res = await saveChatLanguage(code);
+      if (!res.ok) {
+        setLangError(res.error ?? "Could not save — try again.");
+        setLangBusy(null);
+        return;
+      }
+      setMessages((prev) => [...prev, { key: `l${Date.now()}`, role: "system", content: `🌍 Replies will now be in ${chatLanguageLabel(code)}.` }]);
+      setLangBusy(null);
+      setViewSafe("chat");
+    });
   }
 
   useEffect(() => {
@@ -251,6 +279,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
     // state doesn't cascade renders; ⟳ History re-runs the same loader.
     const id = setTimeout(fetchThread, 0);
     return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-once loader; ☰ Chats re-runs it explicitly
   }, []);
 
   function send(text: string) {
@@ -556,7 +585,9 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        {view === "models" ? (
+        {view === "language" ? (
+          <LanguagePickerView onPick={pickLanguage} busy={langBusy} error={langError} />
+        ) : view === "models" ? (
           <ModelsView
             pairs={modelPairs}
             selectedKey={selectedModelKey}
@@ -895,6 +926,46 @@ function ModelsView({
       >
         ⚙ Manage providers &amp; catalogs
       </Link>
+    </div>
+  );
+}
+
+/** First-run language selector — shown once, before the first message. */
+function LanguagePickerView({
+  onPick,
+  busy,
+  error,
+}: {
+  onPick: (code: string) => void;
+  busy: string | null;
+  error: string | null;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-[#FFFBEF]">
+      <div className="border-b-2 border-neutral-900 bg-white px-3 py-2">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-neutral-900">Pick your language</p>
+        <p className="text-[10px] text-neutral-500">Rasoi AI will always reply in this language. Change it anytime in Settings.</p>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3">
+        <div className="grid grid-cols-2 gap-2">
+          {CHAT_LANGUAGES.map((l) => (
+            <button
+              key={l.code}
+              type="button"
+              onClick={() => onPick(l.code)}
+              disabled={busy !== null}
+              className={`rounded-none border-2 border-neutral-900 bg-white px-2 py-3 text-left shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none disabled:opacity-50 ${
+                busy === l.code ? "nb-loading cursor-wait" : ""
+              }`}
+            >
+              <span className="block text-sm font-extrabold text-neutral-900">{l.native}</span>
+              <span className="block text-[9px] text-neutral-400">{l.english}</span>
+            </button>
+          ))}
+        </div>
+        {busy && <p className="mt-3 text-center text-[10px] font-bold uppercase tracking-wide text-neutral-400">Saving…</p>}
+        {error && <p className="nb-shake mt-3 text-xs font-bold text-red-700">{error}</p>}
+      </div>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { testProviderCreds } from "@/lib/ai/provider";
 import { getUser } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
 import { checkRate, rateLimited } from "@/lib/rate-limit";
+import { CHAT_LANGUAGE_CODES } from "@/lib/ai/assistant/languages";
 
 export type ProviderActionState = { error: string | null; ok: string | null };
 
@@ -85,6 +86,26 @@ export async function addAiProvider(
 
   revalidatePath("/settings");
   return { error: null, ok: `${parsed.data.label} added` };
+}
+
+/** Persists the assistant's reply language (chat panel + Settings). */
+export async function saveChatLanguage(
+  language: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const user = await getUser();
+  if (!user) return { ok: false, error: "Not signed in" };
+  const parsed = z.string().trim().max(20).safeParse(language);
+  if (!parsed.success || !(CHAT_LANGUAGE_CODES as readonly string[]).includes(parsed.data)) {
+    return { ok: false, error: "Pick a language from the list." };
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("profiles")
+    .update({ chat_language: parsed.data })
+    .eq("id", user.id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
 }
 
 const updateProviderSchema = providerFormSchema.extend({

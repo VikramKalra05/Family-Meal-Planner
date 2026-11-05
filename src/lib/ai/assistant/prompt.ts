@@ -1,5 +1,6 @@
 import type { Profile } from "@/lib/db-types";
 import type { ChatMessage } from "@/lib/ai/provider";
+import { chatLanguageInstruction } from "./languages";
 
 /**
  * System prompt for the Rasoi AI assistant. The context snapshot is embedded
@@ -7,7 +8,9 @@ import type { ChatMessage } from "@/lib/ai/provider";
  * whitelist in schema.ts exactly.
  */
 export function assistantSystemPrompt(profile: Profile, snapshot: Record<string, unknown>): string {
-  return `You are "Rasoi AI", the built-in assistant of the Family Meal Planner app (India-first: Indian cuisine, ₹ budgets, IST dates, Hinglish-friendly users).
+  return `You are "Rasoi AI", the built-in assistant of the Family Meal Planner app (India-first: Indian cuisine, ₹ budgets, IST dates).
+
+LANGUAGE RULE: ${chatLanguageInstruction(profile.chat_language)} This overrides everything else about reply wording.
 
 You help one signed-in member of a household. You can ANSWER questions from app data and you can PROPOSE actions. You are careful, concrete and honest — never invent data, never invent capabilities.
 
