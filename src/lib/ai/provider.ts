@@ -103,10 +103,14 @@ export class ProviderError extends Error {
 export async function chatComplete(
   provider: ResolvedProvider,
   messages: ChatMessage[],
-  opts: { json?: boolean; maxTokens?: number; temperature?: number; feature?: string } = {},
+  opts: { json?: boolean; maxTokens?: number; temperature?: number; feature?: string; signal?: AbortSignal } = {},
 ): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
+  // External stop (assistant Stop button / client disconnect) joins the same
+  // controller, so the in-flight LLM fetch actually cancels.
+  const onExternalAbort = () => controller.abort();
+  opts.signal?.addEventListener("abort", onExternalAbort);
   try {
     const res = await fetch(`${provider.baseUrl}/chat/completions`, {
       method: "POST",
@@ -174,11 +178,15 @@ export async function chatComplete(
   } catch (e) {
     if (e instanceof ProviderError) throw e;
     if ((e as Error).name === "AbortError") {
+      // External stop: rethrow so the assistant loop can treat it as
+      // "stopped" (distinct from our own 60s timeout).
+      if (opts.signal?.aborted) throw e;
       throw new ProviderError("Provider timed out after 60s.");
     }
     throw new ProviderError(`Could not reach ${provider.label}: ${(e as Error).message}`);
   } finally {
     clearTimeout(timeout);
+    opts.signal?.removeEventListener("abort", onExternalAbort);
   }
 }
 
@@ -218,6 +226,8 @@ export async function chatJson<T>(
     temperature?: number;
     /** Ledger label, e.g. "meal_log" or "reel_draft". */
     feature?: string;
+    /** External stop — forwarded to every underlying completion call. */
+    signal?: AbortSignal;
     /** If the parsed JSON matches, throw ProviderRejectedError instead of coercing it into the schema. */
     rejectIf?: (data: unknown) => boolean;
     rejectMessage?: string;
@@ -242,6 +252,7 @@ export async function chatJson<T>(
   }
 
   // One retry with the validation error fed back — cheap and usually enough.
+  if (opts.signal?.aborted) throw Object.assign(new Error("Request aborted"), { name: "AbortError" });
   const retryRaw = await chatComplete(
     provider,
     [

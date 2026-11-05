@@ -67,7 +67,9 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await runAssistantTurn(body.data.message, profile, provider);
+    // req.signal fires when the client disconnects (Stop button aborts the
+    // fetch) — the loop then cancels the LLM call and skips further steps.
+    const result = await runAssistantTurn(body.data.message, profile, provider, req.signal);
     return NextResponse.json(result);
   } catch (e) {
     console.error("[rasoi] turn failed:", e);

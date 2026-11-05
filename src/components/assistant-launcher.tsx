@@ -90,6 +90,8 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
   const [input, setInput] = useState("");
   const [, startSend] = useTransition();
   const bottomRef = useRef<HTMLDivElement>(null);
+  /** Aborts the in-flight turn (Stop button). */
+  const stopRef = useRef<AbortController | null>(null);
 
   // Esc closes the panel.
   useEffect(() => {
@@ -158,20 +160,26 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
     setInput("");
     setMessages((prev) => [...prev, { key: `u${Date.now()}`, role: "user", content: trimmed }]);
     setBusy({ kind: "thinking" });
+    const ac = new AbortController();
+    stopRef.current = ac;
     startSend(async () => {
       try {
         const res = await fetch("/api/ai/chat", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ message: trimmed, ...(selectedProviderId ? { provider_id: selectedProviderId } : {}) }),
+          signal: ac.signal,
         });
         const data = (await res.json()) as {
           reply?: string;
           toolTrace?: string[];
           proposal?: Proposal | null;
           error?: string;
+          stopped?: boolean;
         };
-        if (!res.ok || data.error) {
+        if (data.stopped) {
+          setMessages((prev) => [...prev, { key: `s${Date.now()}`, role: "system", content: "⏹ Stopped — the partial answer was discarded." }]);
+        } else if (!res.ok || data.error) {
           setError(data.error ?? "Something went wrong — try again.");
         } else {
           setMessages((prev) => [
@@ -186,9 +194,14 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
             },
           ]);
         }
-      } catch {
-        setError("Network error — is the server up?");
+      } catch (e) {
+        if (ac.signal.aborted || (e as Error).name === "AbortError") {
+          setMessages((prev) => [...prev, { key: `s${Date.now()}`, role: "system", content: "⏹ Stopped — the partial answer was discarded." }]);
+        } else {
+          setError("Network error — is the server up?");
+        }
       } finally {
+        stopRef.current = null;
         setBusy(null);
       }
     });
@@ -401,7 +414,18 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           ))}
 
           {busy?.kind === "thinking" && (
-            <AiWorking compact label="Thinking through your kitchen…" hint="Reading your plan, pantry and progress as needed." />
+            <div className="space-y-2">
+              <AiWorking compact label="Thinking through your kitchen…" hint="Reading your plan, pantry and progress as needed." />
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => stopRef.current?.abort()}
+                  className="rounded-none border-2 border-neutral-900 bg-red-200 px-4 py-1.5 text-[10px] font-extrabold uppercase tracking-wide text-neutral-900 shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+                >
+                  ■ Stop
+                </button>
+              </div>
+            </div>
           )}
 
           {error && (

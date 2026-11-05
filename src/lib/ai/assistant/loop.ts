@@ -42,6 +42,8 @@ export interface AssistantTurnResult {
   toolTrace: string[];
   proposal: AssistantProposal | null;
   error: string | null;
+  /** True when the user pressed Stop mid-turn. */
+  stopped?: boolean;
 }
 
 // ── Thread persistence ──────────────────────────────────────────────────────
@@ -127,7 +129,15 @@ export async function runAssistantTurn(
   userText: string,
   profile: Profile,
   provider: ResolvedProvider,
+  signal?: AbortSignal,
 ): Promise<AssistantTurnResult> {
+  // Stop path: persist a thread note so history reflects the cancellation,
+  // skip any assistant reply, and tell the client.
+  const returnStopped = async (): Promise<AssistantTurnResult> => {
+    await persistMessage(profile.id, "system", "⏹ Stopped — the partial answer was discarded.", { kind: "stopped" });
+    return { reply: "", toolTrace: [], proposal: null, error: null, stopped: true };
+  };
+
   await persistMessage(profile.id, "user", userText);
 
   const [snapshot, thread] = await Promise.all([buildContextSnapshot(profile), loadThread(profile.id)]);
@@ -143,6 +153,7 @@ export async function runAssistantTurn(
   const toolTrace: string[] = [];
 
   for (let step = 0; step < MAX_STEPS; step += 1) {
+    if (signal?.aborted) return await returnStopped();
     let turn;
     try {
       turn = await chatJson(provider, chatTurnSchema, messages, {
@@ -151,6 +162,7 @@ export async function runAssistantTurn(
         feature: "assistant",
       });
     } catch (e) {
+      if (signal?.aborted) return await returnStopped();
       const error =
         e instanceof ProviderError
           ? e.message
@@ -187,9 +199,11 @@ export async function runAssistantTurn(
         "TOOL RESULTS (auto-executed, compact JSON — use these facts in your final answer, then reply with NO actions):\n" +
         JSON.stringify(results).slice(0, 6000),
     });
+    if (signal?.aborted) return await returnStopped();
   }
 
   // Step budget exhausted while still requesting reads — force a final answer.
+  if (signal?.aborted) return await returnStopped();
   messages.push({ role: "user", content: "Tool budget reached. Answer the user now from what you have, with NO actions." });
   try {
     const finalTurn = await chatJson(provider, chatTurnSchema, messages, {
@@ -200,6 +214,7 @@ export async function runAssistantTurn(
     await persistMessage(profile.id, "assistant", finalTurn.reply, { tools: toolTrace });
     return { reply: finalTurn.reply, toolTrace, proposal: null, error: null };
   } catch {
+    if (signal?.aborted) return await returnStopped();
     const reply = "I gathered the data but ran out of room to finish the answer — try asking again.";
     await persistMessage(profile.id, "assistant", reply, { tools: toolTrace });
     return { reply, toolTrace, proposal: null, error: null };
