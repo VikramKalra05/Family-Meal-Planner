@@ -53,10 +53,12 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
   switch (action.action) {
     case "query_week": {
       const weekStart = mondayOf(action.week_start ?? istDateISO());
+      // recipe_nutrition hangs off recipes (no direct FK from plan_entries) —
+      // the embed must go through recipes or PostgREST rejects the whole query.
       const { data: plan } = await supabase
         .from("weekly_plans")
         .select(
-          "week_start, plan_entries(id, entry_date, slot, member_id, member_portions, status, recipe_id, recipes(title), recipe_nutrition(kcal, protein_g))",
+          "week_start, plan_entries(id, entry_date, slot, member_id, member_portions, status, recipe_id, recipes(title, recipe_nutrition(kcal, protein_g)))",
         )
         .eq("household_id", profile.household_id!)
         .eq("week_start", weekStart)
@@ -77,15 +79,14 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
         member_portions: Record<string, number> | null;
         status: string;
         recipe_id: string;
-        recipes: { title: string } | null;
-        recipe_nutrition: { kcal: number; protein_g: number }[] | null;
+        recipes: { title: string; recipe_nutrition: { kcal: number; protein_g: number }[] | null } | null;
       };
       const entries = (plan.plan_entries ?? []) as unknown as Entry[];
       const byDay = new Map<string, unknown[]>();
       for (const e of entries) {
         const eater = e.member_id ? (names.get(e.member_id) ?? "member") : "family (shared)";
         const portion = e.member_id ? (e.member_portions ?? {})[e.member_id] ?? 1 : null;
-        const kcal = e.recipe_nutrition?.[0]?.kcal != null ? Number(e.recipe_nutrition[0].kcal) : null;
+        const kcal = e.recipes?.recipe_nutrition?.[0]?.kcal != null ? Number(e.recipes.recipe_nutrition[0].kcal) : null;
         const list = byDay.get(e.entry_date) ?? [];
         list.push({
           entry_id: e.id,
@@ -110,7 +111,7 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
       const [entriesRes, intakeRes] = await Promise.all([
         supabase
           .from("weekly_plans")
-          .select("plan_entries(id, slot, member_id, member_portions, status, recipes(title), recipe_nutrition(kcal, protein_g))")
+          .select("plan_entries(id, slot, member_id, member_portions, status, recipes(title, recipe_nutrition(kcal, protein_g)))")
           .eq("household_id", profile.household_id!)
           .lte("week_start", today)
           .gte("week_start", new Date(Date.parse(today) - 6 * 86400000).toISOString().slice(0, 10))
@@ -127,8 +128,7 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
         member_id: string | null;
         member_portions: Record<string, number> | null;
         status: string;
-        recipes: { title: string } | null;
-        recipe_nutrition: { kcal: number; protein_g: number }[] | null;
+        recipes: { title: string; recipe_nutrition: { kcal: number; protein_g: number }[] | null } | null;
       };
       const entries = ((entriesRes?.data as { plan_entries: Entry[] } | null)?.plan_entries ?? []).filter(
         (e) => e.member_id === null || e.member_id === profile.id,
@@ -144,7 +144,7 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
           targets,
           planned: entries.map((e) => {
             const portion = e.member_id ? (e.member_portions ?? {})[e.member_id] ?? 1 : null;
-            const kcal = e.recipe_nutrition?.[0]?.kcal != null ? Number(e.recipe_nutrition[0].kcal) : null;
+            const kcal = e.recipes?.recipe_nutrition?.[0]?.kcal != null ? Number(e.recipes.recipe_nutrition[0].kcal) : null;
             return {
               entry_id: e.id,
               slot: e.slot,

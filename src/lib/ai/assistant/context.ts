@@ -21,7 +21,7 @@ export async function buildContextSnapshot(profile: Profile): Promise<Record<str
       .eq("household_id", profile.household_id!),
     supabase
       .from("weekly_plans")
-      .select("id, plan_entries(entry_date, slot, member_id, member_portions, status, recipes(title), recipe_nutrition(kcal))")
+      .select("id, plan_entries(entry_date, slot, member_id, member_portions, status, recipes(title, recipe_nutrition(kcal)))")
       .eq("household_id", profile.household_id!)
       .eq("week_start", weekStart)
       .maybeSingle(),
@@ -58,8 +58,7 @@ export async function buildContextSnapshot(profile: Profile): Promise<Record<str
     member_id: string | null;
     member_portions: Record<string, number> | null;
     status: string;
-    recipes: { title: string } | null;
-    recipe_nutrition: { kcal: number }[] | null;
+    recipes: { title: string; recipe_nutrition: { kcal: number }[] | null } | null;
   };
   const plan = entriesRes?.data as { plan_entries: EntryRow[] } | null;
   const allEntries = plan?.plan_entries ?? [];
@@ -71,7 +70,7 @@ export async function buildContextSnapshot(profile: Profile): Promise<Record<str
     .filter((e) => e.entry_date === today)
     .map((e) => {
       const portion = e.member_id ? (e.member_portions ?? {})[e.member_id] ?? 1 : null;
-      const kcal = e.recipe_nutrition?.[0]?.kcal != null ? Number(e.recipe_nutrition[0].kcal) : null;
+      const kcal = e.recipes?.recipe_nutrition?.[0]?.kcal != null ? Number(e.recipes.recipe_nutrition[0].kcal) : null;
       return {
         slot: e.slot,
         dish: e.recipes?.title ?? "?",

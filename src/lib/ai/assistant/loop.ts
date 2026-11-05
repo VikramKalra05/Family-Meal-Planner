@@ -50,15 +50,24 @@ interface StoredMessage {
   created_at: string;
 }
 
-export async function loadThread(profileId: string): Promise<StoredMessage[]> {
+export interface ThreadLoad {
+  messages: StoredMessage[];
+  /** Set when the history query itself failed (e.g. migration 0010 missing). */
+  error: string | null;
+}
+
+export async function loadThread(profileId: string): Promise<ThreadLoad> {
   const supabase = await createClient();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("ai_chat_messages")
     .select("role, content, meta, created_at")
     .eq("user_id", profileId)
     .order("created_at", { ascending: false })
     .limit(HISTORY_WINDOW);
-  return ((data ?? []) as StoredMessage[]).reverse();
+  // Fail loudly: an unreadable history table must surface, never present as
+  // an innocent empty thread.
+  if (error) return { messages: [], error: error.message };
+  return { messages: ((data ?? []) as StoredMessage[]).reverse(), error: null };
 }
 
 async function persistMessage(
@@ -86,11 +95,10 @@ export async function runAssistantTurn(userText: string, profile: Profile): Prom
 
   await persistMessage(profile.id, "user", userText);
 
-  const snapshot = await buildContextSnapshot(profile);
-  const history = await loadThread(profile.id);
+  const [snapshot, thread] = await Promise.all([buildContextSnapshot(profile), loadThread(profile.id)]);
   // The just-stored user message is the last history entry; the model gets
   // system + prior history + the fresh user line.
-  const priorHistory = history.slice(0, -1);
+  const priorHistory = thread.messages.slice(0, -1);
   const messages: ChatMessage[] = [
     systemMessage(profile, snapshot),
     ...priorHistory.map((m) => ({ role: m.role, content: m.content }) as ChatMessage),

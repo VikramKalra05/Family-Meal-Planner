@@ -46,7 +46,7 @@ export function AssistantLauncher() {
         aria-haspopup="dialog"
         aria-expanded={open}
         title="Rasoi AI — your meal planner assistant"
-        className="mr-2 rounded-none border-2 border-neutral-900 bg-yellow-300 px-2.5 py-1.5 text-sm font-extrabold shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+        className="mr-2 rounded-none border-2 border-neutral-900 bg-white px-2.5 py-1.5 text-sm font-extrabold shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
       >
         ✨
       </button>
@@ -58,12 +58,13 @@ export function AssistantLauncher() {
 function AssistantPanel({ onClose }: { onClose: () => void }) {
   const [messages, setMessages] = useState<PanelMessage[]>([]);
   const [provider, setProvider] = useState<{ label: string; model: string } | null | undefined>(undefined);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [, startSend] = useTransition();
   const bottomRef = useRef<HTMLDivElement>(null);
-  const loadedRef = useRef(false);
 
   // Esc closes the panel.
   useEffect(() => {
@@ -79,15 +80,15 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, busy]);
 
-  // Load the persisted thread once per mount (async state updates land in
-  // promise callbacks — no synchronous setState inside the effect).
-  useEffect(() => {
-    if (loadedRef.current) return;
-    loadedRef.current = true;
+  // Load (or reload) the persisted thread. Async state updates land in
+  // promise callbacks — no synchronous setState inside the effect.
+  function fetchThread() {
+    setHistoryLoading(true);
     fetch("/api/ai/chat")
       .then((r) => r.json())
-      .then((data: { provider: { label: string; model: string } | null; messages?: StoredRow[]; error?: string }) => {
+      .then((data: { provider: { label: string; model: string } | null; messages?: StoredRow[]; historyError?: string | null; error?: string }) => {
         setProvider(data.provider);
+        setHistoryError(data.historyError ?? null);
         if (data.messages) {
           setMessages(
             data.messages.map((m, i) => ({
@@ -101,7 +102,15 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           );
         }
       })
-      .catch(() => setError("Could not load the conversation — is the server up?"));
+      .catch(() => setHistoryError("Could not reach the server — is it up?"))
+      .finally(() => setHistoryLoading(false));
+  }
+
+  useEffect(() => {
+    // Fire after mount (not synchronously in the effect body) so the loading
+    // state doesn't cascade renders; ⟳ History re-runs the same loader.
+    const id = setTimeout(fetchThread, 0);
+    return () => clearTimeout(id);
   }, []);
 
   function send(text: string) {
@@ -207,13 +216,12 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => {
-                setMessages([]);
-                setError(null);
-              }}
-              className="rounded-none border-2 border-neutral-900 bg-white px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+              onClick={() => void fetchThread()}
+              disabled={historyLoading}
+              title="Reload your previous chats"
+              className="rounded-none border-2 border-neutral-900 bg-white px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none disabled:opacity-50"
             >
-              New chat
+              {historyLoading ? "◌ Loading…" : "⟳ History"}
             </button>
             <button
               type="button"
@@ -228,7 +236,17 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
 
         {/* Thread */}
         <div className="flex-1 space-y-3 overflow-y-auto bg-[#FFFBEF] px-3 py-4">
-          {threadEmpty && provider !== null && (
+          {historyError && (
+            <div className="nb-shake border-2 border-neutral-900 bg-red-50 p-3 text-xs font-medium text-red-800 shadow-[2px_2px_0_#111]">
+              <p className="font-extrabold uppercase tracking-wide">Chat history couldn&apos;t load</p>
+              <p className="mt-1">
+                {historyError} — if this mentions a missing table, run{" "}
+                <code className="bg-white px-1">supabase/migrations/0010_ai_chat.sql</code> in the Supabase SQL editor.
+              </p>
+            </div>
+          )}
+
+          {threadEmpty && provider !== null && !historyError && (
             <div className="space-y-3 px-1">
               <div className="border-2 border-neutral-900 bg-lime-200 p-3 text-xs font-medium text-neutral-900 shadow-[2px_2px_0_#111]">
                 Namaste! I can answer anything about your plans, meals, pantry, weight and family — and I can{" "}

@@ -12,10 +12,11 @@ export async function GET() {
     return NextResponse.json({ error: "Finish setting up your profile first." }, { status: 403 });
   }
   const provider = await resolveProvider();
-  const messages = await loadThread(profile.id);
+  const { messages, error: historyError } = await loadThread(profile.id);
   return NextResponse.json({
     provider: provider ? { label: provider.label, model: provider.model } : null,
     messages,
+    historyError,
   });
 }
 
