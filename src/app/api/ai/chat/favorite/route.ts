@@ -30,12 +30,18 @@ export async function POST(req: Request) {
   }
 
   const supabase = await createClient();
-  const { data: row } = await supabase
+  const { data: row, error: rowError } = await supabase
     .from("ai_providers")
     .select("id, model, models, favorite_models")
     .eq("id", body.data.provider_id)
     .eq("user_id", profile.id)
     .maybeSingle();
+  if (rowError && /models|favorite_models/i.test(rowError.message)) {
+    return NextResponse.json(
+      { error: "Favorites need migrations 0012 + 0013 — run supabase/migrations/0012_provider_models.sql and 0013_favorite_models.sql." },
+      { status: 409 },
+    );
+  }
   if (!row) return NextResponse.json({ error: "Provider not found." }, { status: 404 });
 
   const catalog = new Set<string>([

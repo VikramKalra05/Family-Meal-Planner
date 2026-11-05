@@ -18,12 +18,23 @@ export default async function EditProviderPage({
   if (!user) notFound();
 
   const supabase = await createClient();
-  const { data: provider } = await supabase
+  const { data: providerFirst, error: providerError } = await supabase
     .from("ai_providers")
     .select("id, label, base_url, model, models, favorite_models, is_default")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
+  // Migrations 0012/0013 not applied yet? Degrade to the basic row instead of
+  // 404-ing a perfectly valid provider.
+  let provider = providerFirst;
+  if (providerError && /models|favorite_models/i.test(providerError.message)) {
+    ({ data: provider } = await supabase
+      .from("ai_providers")
+      .select("id, label, base_url, model, is_default")
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .maybeSingle());
+  }
   if (!provider) notFound();
 
   return (

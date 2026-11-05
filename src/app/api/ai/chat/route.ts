@@ -20,7 +20,7 @@ export async function GET(req: Request) {
   }
   const requested = new URL(req.url).searchParams.get("conversation");
   const supabase = await createClient();
-  const [providerRes, providersRes, conversations, membersRes] = await Promise.all([
+  const [providerRes, providersResFirst, conversations, membersRes] = await Promise.all([
     resolveProvider(),
     supabase
       .from("ai_providers")
@@ -34,6 +34,17 @@ export async function GET(req: Request) {
       .select("id, display_name")
       .eq("household_id", profile.household_id!),
   ]);
+  // Migrations 0012/0013 not applied? Keep the model dropdown alive with the
+  // basic columns (no catalogs) instead of an empty list.
+  let providersRes = providersResFirst as { data: { id: string; label: string; model: string; is_default: boolean }[] | null; error: { message: string } | null };
+  if (providersRes.error && /models|favorite_models/i.test(providersRes.error.message)) {
+    providersRes = (await supabase
+      .from("ai_providers")
+      .select("id, label, model, is_default")
+      .eq("user_id", profile.id)
+      .order("is_default", { ascending: false })
+      .order("created_at")) as typeof providersRes;
+  }
   // Alias → real name, for the member's own browser only — this mapping is
   // deliberately absent from everything sent to the AI provider.
   const labels = memberLabels(

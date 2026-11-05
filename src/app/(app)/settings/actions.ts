@@ -76,7 +76,12 @@ export async function addAiProvider(
     api_key_encrypted: encryptSecret(parsed.data.api_key),
     is_default: (count ?? 0) === 0,
   });
-  if (error) return { error: error.message, ok: null };
+  if (error) {
+    const message = /models|favorite_models/i.test(error.message)
+      ? "Model catalogs need migrations 0012 + 0013 — run supabase/migrations/0012_provider_models.sql and 0013_favorite_models.sql in the Supabase SQL editor."
+      : error.message;
+    return { error: message, ok: null };
+  }
 
   revalidatePath("/settings");
   return { error: null, ok: `${parsed.data.label} added` };
@@ -128,7 +133,9 @@ export async function updateAiProvider(
   if (error) {
     const message = error.message.includes("duplicate")
       ? "That label is already used by another provider."
-      : error.message;
+      : /models|favorite_models/i.test(error.message)
+        ? "Model catalogs need migrations 0012 + 0013 — run supabase/migrations/0012_provider_models.sql and 0013_favorite_models.sql in the Supabase SQL editor."
+        : error.message;
     return { error: message, ok: null };
   }
 
