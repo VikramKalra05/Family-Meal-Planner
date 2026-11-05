@@ -2,10 +2,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getProfile } from "@/lib/profile";
 import { checkRate, rateLimited } from "@/lib/rate-limit";
-import { runConfirmedAction } from "@/lib/ai/assistant/loop";
+import { resolveChatProvider, runConfirmedAction } from "@/lib/ai/assistant/loop";
 import { assistantActionSchema, isReadAction } from "@/lib/ai/assistant/schema";
 
-const actSchema = z.object({ action: assistantActionSchema });
+const actSchema = z.object({
+  action: assistantActionSchema,
+  /** Chosen model (panel dropdown) — used by mutations that call the LLM (log_meal). */
+  provider_id: z.string().uuid().optional(),
+});
 
 /**
  * Executes a confirmed mutation. The action JSON is re-validated against the
@@ -30,8 +34,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, message: rateLimited(30, 60 * 60 * 1000) }, { status: 429 });
   }
 
+  const provider = await resolveChatProvider(body.data.provider_id, profile);
+  if (body.data.provider_id && !provider) {
+    return NextResponse.json({ ok: false, message: "That model is no longer available — pick another in the ✨ dropdown." }, { status: 409 });
+  }
+
   try {
-    const result = await runConfirmedAction(body.data.action, profile);
+    const result = await runConfirmedAction(body.data.action, profile, provider);
     return NextResponse.json(result);
   } catch (e) {
     console.error("[rasoi] confirmed action failed:", e);

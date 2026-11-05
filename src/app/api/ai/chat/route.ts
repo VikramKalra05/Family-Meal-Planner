@@ -1,26 +1,41 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getProfile } from "@/lib/profile";
+import { createClient } from "@/lib/supabase/server";
 import { checkRate, rateLimited } from "@/lib/rate-limit";
-import { loadThread, runAssistantTurn } from "@/lib/ai/assistant/loop";
+import { loadThread, resolveChatProvider, runAssistantTurn } from "@/lib/ai/assistant/loop";
 import { resolveProvider } from "@/lib/ai/provider";
 
-/** Panel bootstrap: thread history + whether an AI provider is configured. */
+/** Panel bootstrap: provider list, thread history + the active provider. */
 export async function GET() {
   const profile = await getProfile();
   if (!profile?.household_id) {
     return NextResponse.json({ error: "Finish setting up your profile first." }, { status: 403 });
   }
-  const provider = await resolveProvider();
+  const supabase = await createClient();
+  const [providerRes, providersRes] = await Promise.all([
+    resolveProvider(),
+    supabase
+      .from("ai_providers")
+      .select("id, label, model, is_default")
+      .eq("user_id", profile.id)
+      .order("is_default", { ascending: false })
+      .order("created_at"),
+  ]);
   const { messages, error: historyError } = await loadThread(profile.id);
   return NextResponse.json({
-    provider: provider ? { label: provider.label, model: provider.model } : null,
+    provider: providerRes ? { label: providerRes.label, model: providerRes.model } : null,
+    providers: providersRes.data ?? [],
     messages,
     historyError,
   });
 }
 
-const askSchema = z.object({ message: z.string().trim().min(1, "Type something first").max(1000) });
+const askSchema = z.object({
+  message: z.string().trim().min(1, "Type something first").max(1000),
+  /** Optional model-changer pick (ai_providers.id); default provider when omitted. */
+  provider_id: z.string().uuid().optional(),
+});
 
 /** One assistant turn. */
 export async function POST(req: Request) {
@@ -38,8 +53,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: rateLimited(20, 60 * 60 * 1000) }, { status: 429 });
   }
 
+  const provider = await resolveChatProvider(body.data.provider_id, profile);
+  if (!provider) {
+    return NextResponse.json(
+      {
+        error:
+          body.data.provider_id
+            ? "That model is no longer available — pick another in the ✨ dropdown."
+            : "No AI provider configured — add one in Settings → AI Providers and Rasoi AI comes alive.",
+      },
+      { status: 409 },
+    );
+  }
+
   try {
-    const result = await runAssistantTurn(body.data.message, profile);
+    const result = await runAssistantTurn(body.data.message, profile, provider);
     return NextResponse.json(result);
   } catch (e) {
     console.error("[rasoi] turn failed:", e);

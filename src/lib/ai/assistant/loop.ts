@@ -1,6 +1,13 @@
 import type { Profile } from "@/lib/db-types";
 import { createClient } from "@/lib/supabase/server";
-import { chatJson, resolveProvider, ProviderError, type ChatMessage } from "@/lib/ai/provider";
+import {
+  chatJson,
+  resolveProvider,
+  ProviderError,
+  type ChatMessage,
+  type ResolvedProvider,
+} from "@/lib/ai/provider";
+import { decryptSecret } from "@/lib/crypto";
 import { buildContextSnapshot } from "./context";
 import { systemMessage } from "./prompt";
 import {
@@ -80,19 +87,47 @@ async function persistMessage(
   await supabase.from("ai_chat_messages").insert({ user_id: profileId, role, content: content.slice(0, 4000), meta: meta ?? null });
 }
 
+/**
+ * Resolves the provider a chat turn should use: the explicitly picked
+ * ai_providers row (panel model-changer), or the member's default when no
+ * choice was made. Ownership-checked; null means "cannot chat".
+ */
+export async function resolveChatProvider(
+  providerId: string | undefined,
+  profile: Profile,
+): Promise<ResolvedProvider | null> {
+  if (!providerId) return resolveProvider();
+  const supabase = await createClient();
+  const { data: row } = await supabase
+    .from("ai_providers")
+    .select("id, label, base_url, api_key_encrypted, model")
+    .eq("id", providerId)
+    .eq("user_id", profile.id)
+    .maybeSingle();
+  if (!row) return null;
+  try {
+    return {
+      id: row.id,
+      userId: profile.id,
+      label: row.label,
+      baseUrl: row.base_url.replace(/\/+$/, ""),
+      apiKey: decryptSecret(row.api_key_encrypted),
+      model: row.model,
+      source: "user",
+    };
+  } catch {
+    // Stored key undecryptable (encryption key rotated) — no chat on it.
+    return null;
+  }
+}
+
 // ── The turn ────────────────────────────────────────────────────────────────
 
-export async function runAssistantTurn(userText: string, profile: Profile): Promise<AssistantTurnResult> {
-  const provider = await resolveProvider();
-  if (!provider) {
-    return {
-      reply: "",
-      toolTrace: [],
-      proposal: null,
-      error: "No AI provider configured — add one in Settings → AI Providers and Rasoi AI comes alive.",
-    };
-  }
-
+export async function runAssistantTurn(
+  userText: string,
+  profile: Profile,
+  provider: ResolvedProvider,
+): Promise<AssistantTurnResult> {
   await persistMessage(profile.id, "user", userText);
 
   const [snapshot, thread] = await Promise.all([buildContextSnapshot(profile), loadThread(profile.id)]);
@@ -176,8 +211,8 @@ export async function runAssistantTurn(userText: string, profile: Profile): Prom
 export async function runConfirmedAction(
   action: AssistantAction,
   profile: Profile,
+  provider: ResolvedProvider | null,
 ): Promise<{ ok: boolean; message: string }> {
-  const provider = await resolveProvider();
   const result = await executeMutationAction(action, profile, provider);
   await persistMessage(
     profile.id,

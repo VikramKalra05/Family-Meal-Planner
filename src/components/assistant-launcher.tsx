@@ -16,6 +16,13 @@ interface Proposal {
   summary: string;
 }
 
+interface ProviderOption {
+  id: string;
+  label: string;
+  model: string;
+  is_default: boolean;
+}
+
 interface PanelMessage {
   key: string;
   role: "user" | "assistant" | "system";
@@ -58,6 +65,8 @@ export function AssistantLauncher() {
 function AssistantPanel({ onClose }: { onClose: () => void }) {
   const [messages, setMessages] = useState<PanelMessage[]>([]);
   const [provider, setProvider] = useState<{ label: string; model: string } | null | undefined>(undefined);
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
+  const [selectedProviderId, setSelectedProviderId] = useState<string>("");
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
@@ -86,22 +95,35 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
     setHistoryLoading(true);
     fetch("/api/ai/chat")
       .then((r) => r.json())
-      .then((data: { provider: { label: string; model: string } | null; messages?: StoredRow[]; historyError?: string | null; error?: string }) => {
-        setProvider(data.provider);
-        setHistoryError(data.historyError ?? null);
-        if (data.messages) {
-          setMessages(
-            data.messages.map((m, i) => ({
-              key: `h${i}`,
-              role: m.role,
-              content: m.content,
-              tools: m.meta?.tools ?? undefined,
-              proposal: m.meta?.proposal ?? null,
-              state: m.meta?.proposal ? "confirmed" : undefined,
-            })),
-          );
-        }
-      })
+      .then(
+        (data: {
+          provider: { label: string; model: string } | null;
+          providers?: ProviderOption[];
+          messages?: StoredRow[];
+          historyError?: string | null;
+          error?: string;
+        }) => {
+          setProvider(data.provider);
+          setHistoryError(data.historyError ?? null);
+          if (data.providers) {
+            setProviders(data.providers);
+            // Preselect the member's default provider (★) for the conversation.
+            setSelectedProviderId((cur) => cur || data.providers?.find((p) => p.is_default)?.id || data.providers?.[0]?.id || "");
+          }
+          if (data.messages) {
+            setMessages(
+              data.messages.map((m, i) => ({
+                key: `h${i}`,
+                role: m.role,
+                content: m.content,
+                tools: m.meta?.tools ?? undefined,
+                proposal: m.meta?.proposal ?? null,
+                state: m.meta?.proposal ? "confirmed" : undefined,
+              })),
+            );
+          }
+        },
+      )
       .catch(() => setHistoryError("Could not reach the server — is it up?"))
       .finally(() => setHistoryLoading(false));
   }
@@ -125,7 +147,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
         const res = await fetch("/api/ai/chat", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ message: trimmed }),
+          body: JSON.stringify({ message: trimmed, ...(selectedProviderId ? { provider_id: selectedProviderId } : {}) }),
         });
         const data = (await res.json()) as {
           reply?: string;
@@ -164,7 +186,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
         const res = await fetch("/api/ai/chat/act", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ action: proposal.action }),
+          body: JSON.stringify({ action: proposal.action, ...(selectedProviderId ? { provider_id: selectedProviderId } : {}) }),
         });
         const data = (await res.json()) as { ok?: boolean; message?: string; error?: string };
         const message = data.message ?? data.error ?? "Done.";
@@ -207,11 +229,28 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b-2 border-neutral-900 bg-yellow-300 px-4 py-3">
-          <div>
+          <div className="min-w-0">
             <p className="text-sm font-extrabold uppercase tracking-wide text-neutral-900">✨ Rasoi AI</p>
-            <p className="text-[10px] text-neutral-700">
-              {provider ? `via ${provider.label} · ${provider.model}` : "your kitchen copilot"}
-            </p>
+            {providers.length >= 2 ? (
+              <select
+                value={selectedProviderId}
+                onChange={(e) => setSelectedProviderId(e.target.value)}
+                aria-label="Model for this conversation"
+                title="Model for this conversation — your app-wide default in Settings is untouched"
+                className="mt-1 w-full max-w-[210px] truncate rounded-none border-2 border-neutral-900 bg-white px-1 py-0.5 text-[10px] font-bold text-neutral-900 focus:outline-none"
+              >
+                {providers.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.is_default ? "★ " : ""}
+                    {p.label} · {p.model}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-[10px] text-neutral-700">
+                {provider ? `via ${provider.label} · ${provider.model}` : "your kitchen copilot"}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button
