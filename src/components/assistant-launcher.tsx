@@ -2,8 +2,23 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
+import Image from "next/image";
 import Link from "next/link";
 import { AiWorking } from "@/components/ai-working";
+
+/** Gradient sparkle icon (icons8) — the assistant's mark. */
+function AiSpark({ size = 20, className = "" }: { size?: number; className?: string }) {
+  return (
+    <Image
+      src="/icons/ai-spark.png"
+      alt=""
+      width={size}
+      height={size}
+      className={`select-none ${className}`}
+      priority={size >= 20}
+    />
+  );
+}
 
 /**
  * Rasoi AI — the ✨ header button + the assistant panel. Fully
@@ -97,11 +112,11 @@ export function AssistantLauncher() {
         aria-haspopup="dialog"
         aria-expanded={open}
         title="Rasoi AI — your meal planner assistant"
-        className={`mr-2 rounded-none border-2 border-neutral-900 px-2.5 py-1.5 text-sm font-extrabold shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none ${
+        className={`mr-2 flex items-center rounded-none border-2 border-neutral-900 px-2.5 py-1.5 shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none ${
           open ? "bg-yellow-300" : "bg-white"
         }`}
       >
-        ✨
+        <AiSpark size={20} />
       </button>
       {open && dock && createPortal(<AssistantPanel onClose={() => setOpen(false)} />, dock)}
     </>
@@ -418,7 +433,9 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
         {/* Header */}
         <div className="relative flex items-center justify-between border-b-2 border-neutral-900 bg-yellow-300 px-4 py-3">
           <div className="min-w-0">
-            <p className="text-sm font-extrabold uppercase tracking-wide text-neutral-900">✨ Rasoi AI</p>
+            <p className="flex items-center gap-1.5 text-sm font-extrabold uppercase tracking-wide text-neutral-900">
+              <AiSpark size={16} /> Rasoi AI
+            </p>
             {modelPairs.length >= 1 ? (
               <div className="relative mt-1 w-full max-w-[210px]" ref={modelBoxRef}>
                 <button
