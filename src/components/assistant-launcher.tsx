@@ -130,6 +130,8 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
   const [selectedModelKey, setSelectedModelKey] = useState("");
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  /** Alias → real name, for display only. Never sent to the AI provider. */
+  const [memberMap, setMemberMap] = useState<Record<string, string>>({});
   const [historyOpen, setHistoryOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [favBusy, setFavBusy] = useState<string | null>(null);
@@ -205,12 +207,14 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           providers?: ProviderOption[];
           conversations?: ConversationSummary[];
           activeConversationId?: string | null;
+          memberMap?: Record<string, string>;
           messages?: StoredRow[];
           historyError?: string | null;
           error?: string;
         }) => {
           setProvider(data.provider);
           setHistoryError(data.historyError ?? null);
+          if (data.memberMap) setMemberMap(data.memberMap);
           if (data.providers) {
             setProviders(data.providers);
             const pairs = (data.providers ?? []).flatMap((p: ProviderOption) =>
@@ -412,6 +416,10 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
       .finally(() => setFavBusy(null));
   }
 
+  // The model only ever sees aliases ("Member-A"); the real names come back
+  // from the server's memberMap for display in this browser alone.
+  const deAlias = (text: string) => text.replace(/\bMember-[A-Z0-9]+\b/g, (m) => memberMap[m] ?? m);
+
   const threadEmpty = messages.filter((m) => m.role !== "system").length === 0;
 
   return (
@@ -606,6 +614,21 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
                 <strong>do</strong> things for you (log meals, add recipes, regenerate the week…) after you
                 confirm each change.
               </div>
+              {Object.keys(memberMap).length > 0 && (
+                <div className="border-2 border-neutral-900 bg-white p-2.5 text-[10px] text-neutral-600 shadow-[2px_2px_0_#111]">
+                  <p className="font-extrabold uppercase tracking-wide text-neutral-500">Who&apos;s who in chats</p>
+                  <p className="mt-0.5">
+                    For privacy your real names are never sent to the AI — family members appear as aliases.{" "}
+                    {Object.entries(memberMap).map(([alias, name], i) => (
+                      <span key={alias}>
+                        {i > 0 && ", "}
+                        <strong className="text-neutral-900">{alias}</strong> = {name}
+                      </span>
+                    ))}
+                    .
+                  </p>
+                </div>
+              )}
               <div className="flex flex-wrap gap-2">
                 {SUGGESTIONS.map((s) => (
                   <button
@@ -653,20 +676,20 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
                           key={i}
                           className="border border-neutral-900 bg-lime-200 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-neutral-800"
                         >
-                          ✓ {t}
+                          ✓ {deAlias(t)}
                         </span>
                       ))}
                     </div>
                   )}
                   {m.content && (
                     <div className="nb-stamp border-2 border-neutral-900 bg-white px-3 py-2 text-xs leading-relaxed text-neutral-900 shadow-[2px_2px_0_#111]">
-                      {m.content}
+                      {deAlias(m.content)}
                     </div>
                   )}
                   {m.proposal && (
                     <div className="border-2 border-neutral-900 bg-amber-100 p-3 shadow-[3px_3px_0_#111]">
                       <p className="text-[9px] font-extrabold uppercase tracking-widest text-neutral-500">Confirm to run</p>
-                      <p className="mt-1 text-xs font-bold text-neutral-900">{m.proposal.summary}</p>
+                      <p className="mt-1 text-xs font-bold text-neutral-900">{deAlias(m.proposal.summary)}</p>
                       {m.state === "pending" ? (
                         <div className="mt-2 flex gap-2">
                           <button

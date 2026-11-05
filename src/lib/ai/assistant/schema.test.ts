@@ -98,11 +98,11 @@ describe("summarizeAction", () => {
   it("names the member when a family message targets one", () => {
     const text = summarizeAction({
       action: "send_family_message",
-      to_member_name: "Priya",
+      to_member: "Member-B",
       kind: "instruction",
       title: "Prep",
       body: "x",
     } as never);
-    expect(text).toContain("Priya");
+    expect(text).toContain("Member-B");
   });
 });

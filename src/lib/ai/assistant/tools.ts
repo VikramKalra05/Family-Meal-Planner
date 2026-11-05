@@ -20,6 +20,7 @@ import { ageFromDob } from "@/lib/age";
 import { healthTags } from "@/lib/nutrition/health";
 import { weightTrend, progressPct, projectTargetDate } from "@/lib/weight";
 import { istDateISO, istHour } from "@/lib/date";
+import { memberLabels } from "./labels";
 import { chatJson, ProviderError, type ResolvedProvider } from "@/lib/ai/provider";
 import { importDraftRecipe } from "@/app/(app)/recipes/from-reel/actions";
 import type { AssistantAction } from "./schema";
@@ -69,7 +70,11 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
         .from("profiles")
         .select("id, display_name")
         .eq("household_id", profile.household_id!);
-      const names = new Map((memberRows ?? []).map((m) => [m.id as string, m.display_name as string]));
+      // Privacy: aliases only — real names never reach the model.
+      const names = memberLabels(
+        (memberRows ?? []).map((m) => ({ id: m.id, display_name: m.display_name })),
+        profile.id,
+      );
 
       type Entry = {
         id: string;
@@ -327,18 +332,22 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
       const [membersRes, inviteRes, unreadRes] = await Promise.all([
         supabase
           .from("profiles")
-          .select("display_name, role, diet_type, allergies, targets_cache")
+          .select("id, display_name, role, diet_type, allergies, targets_cache")
           .eq("household_id", profile.household_id!),
         supabase.from("households").select("name, invite_code").eq("id", profile.household_id!).maybeSingle(),
         supabase
           .from("messages")
-          .select("title, body, kind, created_at, profiles(display_name)")
+          .select("title, body, kind, created_at, profiles(id)")
           .or(`to_member.is.null,to_member.eq.${profile.id}`)
           .is("read_at", null)
           .neq("from_member", profile.id)
           .order("created_at", { ascending: false })
           .limit(10),
       ]);
+      const labels = memberLabels(
+        (membersRes.data ?? []).map((m) => ({ id: m.id, display_name: m.display_name })),
+        profile.id,
+      );
       return {
         ok: true,
         message: "Checked the family",
@@ -346,14 +355,14 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
           household: inviteRes?.data?.name ?? null,
           invite_code: inviteRes?.data?.invite_code ?? null,
           members: (membersRes.data ?? []).map((m) => ({
-            name: m.display_name,
+            member: labels.get(m.id) ?? "a member",
             role: m.role,
             diet: m.diet_type,
             allergies: m.allergies ?? [],
             target_kcal: (m.targets_cache as { targets?: { kcal?: number } } | null)?.targets?.kcal ?? null,
           })),
           unread_messages: (unreadRes.data ?? []).map((m) => ({
-            from: (m.profiles as unknown as { display_name: string } | null)?.display_name ?? "?",
+            from: labels.get((m.profiles as unknown as { id: string } | null)?.id ?? "") ?? "a member",
             kind: m.kind,
             title: m.title,
             body: m.body,
@@ -400,12 +409,16 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
 
     case "suggest_dishes": {
       const { plannerRecipes, members } = await loadPlanData(profile);
-      const eater = action.member_name
-        ? members.find((m) => m.name.toLowerCase() === action.member_name!.toLowerCase()) ??
-          members.find((m) => m.name.toLowerCase().includes(action.member_name!.toLowerCase()))
+      const labels = memberLabels(
+        members.map((m) => ({ id: m.id, display_name: m.name })),
+        profile.id,
+      );
+      const wanted = action.member?.toLowerCase();
+      const eater = wanted
+        ? members.find((m) => (labels.get(m.id) ?? "").toLowerCase() === wanted)
         : null;
-      if (action.member_name && !eater) {
-        return { ok: false, message: `No member named “${action.member_name}” — check query_family for exact names` };
+      if (action.member && !eater) {
+        return { ok: false, message: `No member with that alias — query_family lists the exact aliases (e.g. "Member-A")` };
       }
       const member: PlannerMember = eater ?? sharedDiet(members);
       const usedTitles = new Set<string>();
@@ -735,17 +748,20 @@ export async function executeMutationAction(
 
     case "send_family_message": {
       let toMemberId: string | null = null;
-      if (action.to_member_name) {
-        const { data: member } = await supabase
+      let toLabel = "the whole family";
+      if (action.to_member) {
+        const { data: householdMembers } = await supabase
           .from("profiles")
           .select("id, display_name")
-          .eq("household_id", profile.household_id!)
-          .ilike("display_name", `%${action.to_member_name}%`)
-          .limit(2);
-        if (!member || member.length !== 1) {
-          return { ok: false, message: `Could not uniquely find a member named “${action.to_member_name}” — use their exact name.` };
+          .eq("household_id", profile.household_id!);
+        const labels = memberLabels(householdMembers ?? [], profile.id);
+        const wanted = action.to_member.toLowerCase();
+        const hit = [...labels.entries()].find(([, label]) => label.toLowerCase() === wanted);
+        if (!hit) {
+          return { ok: false, message: `No member with that alias — query_family lists the exact aliases (e.g. "Member-A")` };
         }
-        toMemberId = member[0].id;
+        toMemberId = hit[0];
+        toLabel = labels.get(toMemberId) ?? "the member";
       }
       const { error } = await supabase.from("messages").insert({
         household_id: profile.household_id!,
@@ -756,7 +772,7 @@ export async function executeMutationAction(
         body: action.body,
       });
       if (error) return { ok: false, message: error.message };
-      return { ok: true, message: `${action.kind === "instruction" ? "Instruction" : "Suggestion"} sent to ${action.to_member_name ?? "the whole family"}.` };
+      return { ok: true, message: `${action.kind === "instruction" ? "Instruction" : "Suggestion"} sent to ${toLabel}.` };
     }
 
     case "set_weigh_in_reminder": {

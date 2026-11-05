@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { istDateISO, istTimeHHMM, formatIstDate } from "@/lib/date";
 import { mondayOf } from "@/lib/planner";
 import { weightTrend } from "@/lib/weight";
+import { memberLabels } from "./labels";
 
 /**
  * Compact, grounding snapshot of the household's current state, embedded in
@@ -62,8 +63,10 @@ export async function buildContextSnapshot(profile: Profile): Promise<Record<str
   };
   const plan = entriesRes?.data as { plan_entries: EntryRow[] } | null;
   const allEntries = plan?.plan_entries ?? [];
-  const memberName = new Map(
-    (membersRes.data ?? []).map((m) => [m.id as string, m.display_name as string]),
+  // Privacy: the model sees stable aliases, never real display names.
+  const memberLabel = memberLabels(
+    (membersRes.data ?? []).map((m) => ({ id: m.id as string, display_name: m.display_name as string })),
+    profile.id,
   );
 
   const todayEntries = allEntries
@@ -74,7 +77,7 @@ export async function buildContextSnapshot(profile: Profile): Promise<Record<str
       return {
         slot: e.slot,
         dish: e.recipes?.title ?? "?",
-        who: e.member_id ? (memberName.get(e.member_id) ?? "member") : "family (shared)",
+        who: e.member_id ? (memberLabel.get(e.member_id) ?? "a member") : "family (shared)",
         kcal: kcal != null && portion != null ? Math.round(kcal * portion) : kcal,
         status: e.status,
       };
@@ -97,7 +100,6 @@ export async function buildContextSnapshot(profile: Profile): Promise<Record<str
       week_start: weekStart,
     },
     me: {
-      name: profile.display_name,
       role: profile.role,
       diet: profile.diet_type,
       allergies: profile.allergies ?? [],
@@ -108,7 +110,7 @@ export async function buildContextSnapshot(profile: Profile): Promise<Record<str
         : null,
     },
     family: (membersRes.data ?? []).map((m) => ({
-      name: m.display_name,
+      member: memberLabel.get(m.id as string) ?? "a member",
       role: m.role,
       diet: m.diet_type,
       allergies: m.allergies ?? [],

@@ -67,8 +67,8 @@ const queryUsage = z.object({
 const suggestDishes = z.object({
   action: z.literal("suggest_dishes"),
   slot: slotEnum,
-  /** Member name from query_family / the snapshot; omit for the whole family. */
-  member_name: z.string().trim().min(1).max(60).optional(),
+  /** Member alias from query_family / the snapshot (e.g. "Member-A"); omit for the whole family. */
+  member: z.string().trim().min(1).max(60).optional(),
   max_kcal: z.coerce.number().min(50).max(2000).optional(),
 });
 
@@ -131,8 +131,8 @@ const toggleShoppingItem = z.object({
 
 const sendFamilyMessage = z.object({
   action: z.literal("send_family_message"),
-  /** Exact member name to message; omit to send to the whole family. */
-  to_member_name: z.string().trim().min(1).max(60).optional(),
+  /** Member alias to message (e.g. "Member-A"); omit to send to the whole family. */
+  to_member: z.string().trim().min(1).max(60).optional(),
   kind: z.enum(["suggestion", "instruction"]),
   title: z.string().trim().min(2).max(80),
   body: z.string().trim().min(2).max(600),
@@ -238,7 +238,7 @@ export function summarizeAction(action: AssistantAction): string {
     case "toggle_shopping_item":
       return `Check off “${truncate(action.item_name, 50)}” on the shopping list`;
     case "send_family_message": {
-      const to = action.to_member_name ? action.to_member_name : "the whole family";
+      const to = action.to_member ?? "the whole family";
       return `Send ${action.kind} to ${to}: “${truncate(action.title, 50)}”`;
     }
     case "set_weigh_in_reminder": {

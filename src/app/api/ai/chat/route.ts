@@ -10,6 +10,7 @@ import {
   runAssistantTurn,
 } from "@/lib/ai/assistant/loop";
 import { resolveProvider } from "@/lib/ai/provider";
+import { memberLabels } from "@/lib/ai/assistant/labels";
 
 /** Panel bootstrap: conversations list, provider list + the active thread. */
 export async function GET(req: Request) {
@@ -19,7 +20,7 @@ export async function GET(req: Request) {
   }
   const requested = new URL(req.url).searchParams.get("conversation");
   const supabase = await createClient();
-  const [providerRes, providersRes, conversations] = await Promise.all([
+  const [providerRes, providersRes, conversations, membersRes] = await Promise.all([
     resolveProvider(),
     supabase
       .from("ai_providers")
@@ -28,7 +29,23 @@ export async function GET(req: Request) {
       .order("is_default", { ascending: false })
       .order("created_at"),
     listConversations(profile.id),
+    supabase
+      .from("profiles")
+      .select("id, display_name")
+      .eq("household_id", profile.household_id!),
   ]);
+  // Alias → real name, for the member's own browser only — this mapping is
+  // deliberately absent from everything sent to the AI provider.
+  const labels = memberLabels(
+    (membersRes.data ?? []).map((m) => ({ id: m.id, display_name: m.display_name })),
+    profile.id,
+  );
+  const memberMap: Record<string, string> = {};
+  for (const [id, label] of labels) {
+    if (label === "You") continue;
+    const real = (membersRes.data ?? []).find((m) => m.id === id)?.display_name;
+    if (real) memberMap[label] = real;
+  }
   // Active thread: the requested conversation (if owned), else the most recent.
   const activeConversationId =
     (requested && conversations.some((c) => c.id === requested) ? requested : null) ??
@@ -40,6 +57,7 @@ export async function GET(req: Request) {
   return NextResponse.json({
     provider: providerRes ? { label: providerRes.label, model: providerRes.model } : null,
     providers: providersRes.data ?? [],
+    memberMap,
     conversations,
     activeConversationId,
     messages,
