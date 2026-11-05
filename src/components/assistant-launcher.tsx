@@ -116,6 +116,8 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
+  const [favBusy, setFavBusy] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
@@ -125,15 +127,50 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   /** Aborts the in-flight turn (Stop button). */
   const stopRef = useRef<AbortController | null>(null);
+  const modelBoxRef = useRef<HTMLDivElement>(null);
+  const chatsBoxRef = useRef<HTMLDivElement>(null);
+  // Ref mirrors so the single Esc/click-outside handlers know popover order
+  // without re-subscribing on every state change.
+  const modelOpenRef = useRef(false);
+  const historyOpenRef = useRef(false);
+  function setModelOpenSafe(v: boolean) {
+    modelOpenRef.current = v;
+    setModelOpen(v);
+  }
+  function setHistoryOpenSafe(v: boolean) {
+    historyOpenRef.current = v;
+    setHistoryOpen(v);
+  }
 
-  // Esc closes the panel.
+  // Esc closes popovers first, then the panel.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (modelOpenRef.current) {
+          setModelOpenSafe(false);
+          return;
+        }
+        if (historyOpenRef.current) {
+          setHistoryOpenSafe(false);
+          return;
+        }
+        onClose();
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // Click outside a popover closes it.
+  useEffect(() => {
+    function onDocMouseDown(e: MouseEvent) {
+      const t = e.target as Node;
+      if (modelOpenRef.current && modelBoxRef.current && !modelBoxRef.current.contains(t)) setModelOpenSafe(false);
+      if (historyOpenRef.current && chatsBoxRef.current && !chatsBoxRef.current.contains(t)) setHistoryOpenSafe(false);
+    }
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, []);
 
   // Keep the newest message in view.
   useEffect(() => {
@@ -315,6 +352,51 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
     })
     .sort((a, b) => Number(b.isFavorite) - Number(a.isFavorite));
 
+  const currentPair = modelPairs.find((o) => o.key === selectedModelKey) ?? null;
+
+  /** Stars/unstars a (provider, model) pair straight from the chat dropdown. */
+  function toggleFavoritePair(pair: ModelPair) {
+    const nextFav = !pair.isFavorite;
+    setFavBusy(pair.key);
+    setProviders((prev) =>
+      prev.map((p) =>
+        p.id === pair.providerId
+          ? {
+              ...p,
+              favorite_models: nextFav
+                ? [...(p.favorite_models ?? []), pair.model]
+                : (p.favorite_models ?? []).filter((m) => m !== pair.model),
+            }
+          : p,
+      ),
+    );
+    fetch("/api/ai/chat/favorite", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider_id: pair.providerId, model: pair.model, favorite: nextFav }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("failed");
+      })
+      .catch(() => {
+        // Revert the optimistic flip.
+        setProviders((prev) =>
+          prev.map((p) =>
+            p.id === pair.providerId
+              ? {
+                  ...p,
+                  favorite_models: nextFav
+                    ? (p.favorite_models ?? []).filter((m) => m !== pair.model)
+                    : [...(p.favorite_models ?? []), pair.model],
+                }
+              : p,
+          ),
+        );
+        setError("Could not save the favorite — try again.");
+      })
+      .finally(() => setFavBusy(null));
+  }
+
   const threadEmpty = messages.filter((m) => m.role !== "system").length === 0;
 
   return (
@@ -338,20 +420,82 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           <div className="min-w-0">
             <p className="text-sm font-extrabold uppercase tracking-wide text-neutral-900">✨ Rasoi AI</p>
             {modelPairs.length >= 1 ? (
-              <select
-                value={selectedModelKey}
-                onChange={(e) => setSelectedModelKey(e.target.value)}
-                aria-label="Model for this conversation"
-                title="Model for this conversation — your app-wide default in Settings is untouched"
-                className="mt-1 w-full max-w-[190px] truncate rounded-none border-2 border-neutral-900 bg-white px-1 py-0.5 text-[10px] font-bold text-neutral-900 focus:outline-none"
-              >
-                {modelPairs.map((o) => (
-                  <option key={o.key} value={o.key}>
-                    {o.isFavorite ? "⭐ " : o.is_default ? "★ " : ""}
-                    {o.label} · {o.model}
-                  </option>
-                ))}
-              </select>
+              <div className="relative mt-1 w-full max-w-[210px]" ref={modelBoxRef}>
+                <button
+                  type="button"
+                  onClick={() => setModelOpenSafe(!modelOpenRef.current)}
+                  aria-expanded={modelOpen}
+                  aria-haspopup="listbox"
+                  aria-label="Model for this conversation"
+                  title="Model for this conversation — your app-wide default in Settings is untouched"
+                  className="flex w-full items-center justify-between gap-1 rounded-none border-2 border-neutral-900 bg-white px-1.5 py-1 text-left text-[10px] font-bold text-neutral-900 shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+                >
+                  <span className="truncate">
+                    {currentPair?.isFavorite ? "⭐ " : currentPair?.is_default ? "★ " : ""}
+                    {currentPair ? currentPair.model : "Model"}
+                  </span>
+                  <span className="text-neutral-400" aria-hidden>
+                    ▾
+                  </span>
+                </button>
+                {modelOpen && (
+                  <div
+                    role="listbox"
+                    aria-label="Available models"
+                    className="absolute left-0 right-0 top-full z-20 mt-1 border-2 border-neutral-900 bg-white shadow-[4px_4px_0_#111]"
+                  >
+                    <p className="border-b border-neutral-200 px-2 py-1 text-[9px] font-extrabold uppercase tracking-widest text-neutral-400">
+                      Models — ⭐ pins it on top
+                    </p>
+                    <div className="max-h-64 overflow-y-auto">
+                      {modelPairs.map((o) => (
+                        <div key={o.key} className={`flex items-stretch ${o.isFavorite ? "bg-amber-50" : ""}`}>
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={o.key === selectedModelKey}
+                            onClick={() => {
+                              setSelectedModelKey(o.key);
+                              setModelOpenSafe(false);
+                            }}
+                            className={`min-w-0 flex-1 px-2 py-1.5 text-left transition-colors hover:bg-amber-50 ${
+                              o.key === selectedModelKey ? "bg-yellow-300" : ""
+                            }`}
+                          >
+                            <span className="block truncate text-[11px] font-bold text-neutral-900">
+                              {o.isFavorite ? "⭐ " : ""}
+                              {o.model}
+                            </span>
+                            <span className="block truncate text-[9px] text-neutral-400">
+                              {o.label}
+                              {o.is_default ? " · default" : ""}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleFavoritePair(o)}
+                            disabled={favBusy === o.key}
+                            aria-label={o.isFavorite ? `Unstar ${o.model}` : `Star ${o.model}`}
+                            title={o.isFavorite ? "Unstar" : "Star — pins to top"}
+                            className={`w-9 text-center text-sm transition-colors hover:bg-amber-100 disabled:opacity-40 ${
+                              o.isFavorite ? "text-amber-500" : "text-neutral-300"
+                            }`}
+                          >
+                            {favBusy === o.key ? "◌" : o.isFavorite ? "⭐" : "☆"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <Link
+                      href="/settings"
+                      onClick={onClose}
+                      className="block border-t border-neutral-200 px-2 py-1.5 text-[9px] font-extrabold uppercase tracking-wide text-emerald-700 hover:bg-amber-50"
+                    >
+                      ⚙ Add or edit providers
+                    </Link>
+                  </div>
+                )}
+              </div>
             ) : (
               <p className="text-[10px] text-neutral-700">
                 {provider ? `via ${provider.label} · ${provider.model}` : "your kitchen copilot"}
@@ -364,7 +508,8 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
               onClick={() => {
                 setConversationId(null);
                 setMessages([]);
-                setHistoryOpen(false);
+                setHistoryOpenSafe(false);
+                setModelOpenSafe(false);
                 setError(null);
               }}
               title="Start a fresh conversation"
@@ -374,7 +519,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
             </button>
             <button
               type="button"
-              onClick={() => setHistoryOpen((v) => !v)}
+              onClick={() => setHistoryOpenSafe(!historyOpenRef.current)}
               aria-expanded={historyOpen}
               disabled={historyLoading}
               title="Previous chats"
@@ -405,7 +550,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
                       key={c.id}
                       type="button"
                       onClick={() => {
-                        setHistoryOpen(false);
+                        setHistoryOpenSafe(false);
                         setConversationId(c.id);
                         fetchThread(c.id);
                       }}
