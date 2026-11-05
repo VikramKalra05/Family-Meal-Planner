@@ -23,7 +23,7 @@ export async function GET(req: Request) {
     resolveProvider(),
     supabase
       .from("ai_providers")
-      .select("id, label, model, is_default")
+      .select("id, label, model, models, is_default")
       .eq("user_id", profile.id)
       .order("is_default", { ascending: false })
       .order("created_at"),
@@ -53,6 +53,8 @@ const askSchema = z.object({
   provider_id: z.string().uuid().optional(),
   /** Conversation to append to; omitted/null = start a new chat. */
   conversation_id: z.string().uuid().nullable().optional(),
+  /** Model override (a model from the picked provider's saved catalog). */
+  model: z.string().trim().min(1).max(120).optional(),
 });
 
 /** One assistant turn. */
@@ -71,7 +73,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: rateLimited(20, 60 * 60 * 1000) }, { status: 429 });
   }
 
-  const provider = await resolveChatProvider(body.data.provider_id, profile);
+  const provider = await resolveChatProvider(body.data.provider_id, profile, body.data.model);
   if (!provider) {
     return NextResponse.json(
       {

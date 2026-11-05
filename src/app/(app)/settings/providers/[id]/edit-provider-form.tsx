@@ -2,6 +2,7 @@
 
 import { useActionState, useState, useTransition } from "react";
 import { updateAiProvider, testProviderUpdate, type ProviderActionState } from "@/app/(app)/settings/actions";
+import { ModelPicker } from "../../model-picker";
 import { AiWorking } from "@/components/ai-working";
 
 const input =
@@ -11,12 +12,13 @@ const label = "mb-1.5 block text-xs font-semibold uppercase tracking-wide text-n
 export function EditProviderForm({
   provider,
 }: {
-  provider: { id: string; label: string; base_url: string; model: string; is_default: boolean };
+  provider: { id: string; label: string; base_url: string; model: string; is_default: boolean; models: string[] | null };
 }) {
   const [state, action, pending] = useActionState<ProviderActionState, FormData>(updateAiProvider, {
     error: null,
     ok: null,
   });
+  const [modelsJson, setModelsJson] = useState(JSON.stringify(provider.models ?? []));
   const [baseUrl, setBaseUrl] = useState(provider.base_url);
   const [model, setModel] = useState(provider.model);
   const [apiKey, setApiKey] = useState("");
@@ -73,6 +75,13 @@ export function EditProviderForm({
           className={`${input} font-mono text-xs`}
         />
       </div>
+
+      <ModelPicker
+        getCredentials={() => ({ base_url: baseUrl, api_key: apiKey, provider_id: provider.id })}
+        initialModels={provider.models ?? []}
+        onModelsChange={(models: string[]) => setModelsJson(JSON.stringify(models))}
+      />
+      <input type="hidden" name="models_json" value={modelsJson} />
 
       <div>
         <label className={label} htmlFor="api_key">Replace API key (optional)</label>

@@ -20,7 +20,7 @@ export default async function EditProviderPage({
   const supabase = await createClient();
   const { data: provider } = await supabase
     .from("ai_providers")
-    .select("id, label, base_url, model, is_default")
+    .select("id, label, base_url, model, models, is_default")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -37,7 +37,16 @@ export default async function EditProviderPage({
       </div>
 
       <div className="rounded-none border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0_#111]">
-        <EditProviderForm provider={provider} />
+        <EditProviderForm
+      provider={{
+        id: provider.id,
+        label: provider.label,
+        base_url: provider.base_url,
+        model: provider.model,
+        is_default: provider.is_default,
+        models: Array.isArray(provider.models) ? (provider.models as string[]) : [],
+      }}
+    />
       </div>
 
       <p className="text-[11px] text-neutral-400">

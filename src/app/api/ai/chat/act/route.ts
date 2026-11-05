@@ -11,6 +11,8 @@ const actSchema = z.object({
   provider_id: z.string().uuid().optional(),
   /** Conversation the confirmed action belongs to (for the thread note). */
   conversation_id: z.string().uuid().nullable().optional(),
+  /** Model override, matching the model-changer pick. */
+  model: z.string().trim().min(1).max(120).optional(),
 });
 
 /**
@@ -36,7 +38,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, message: rateLimited(30, 60 * 60 * 1000) }, { status: 429 });
   }
 
-  const provider = await resolveChatProvider(body.data.provider_id, profile);
+  const provider = await resolveChatProvider(body.data.provider_id, profile, body.data.model);
   if (body.data.provider_id && !provider) {
     return NextResponse.json({ ok: false, message: "That model is no longer available — pick another in the ✨ dropdown." }, { status: 409 });
   }

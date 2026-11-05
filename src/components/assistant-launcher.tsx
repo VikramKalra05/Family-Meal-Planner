@@ -27,6 +27,16 @@ interface ProviderOption {
   id: string;
   label: string;
   model: string;
+  models?: string[] | null;
+  is_default: boolean;
+}
+
+/** One selectable (provider, model) pair for the chat header dropdown. */
+interface ModelPair {
+  key: string;
+  providerId: string;
+  model: string;
+  label: string;
   is_default: boolean;
 }
 
@@ -47,6 +57,18 @@ interface PanelMessage {
 }
 
 type Busy = { kind: "thinking" } | { kind: "confirming"; messageKey: string } | null;
+
+/** "providerId|model" → { provider_id, model } for the API payloads. */
+function splitModelKey(key: string): { provider_id?: string; model?: string } {
+  const sep = key.indexOf("|");
+  if (sep <= 0) return {};
+  const provider_id = key.slice(0, sep);
+  const model = key.slice(sep + 1);
+  return {
+    ...(provider_id ? { provider_id } : {}),
+    ...(model ? { model } : {}),
+  };
+}
 
 const SUGGESTIONS = [
   "What's for dinner Thursday?",
@@ -88,7 +110,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
   const [messages, setMessages] = useState<PanelMessage[]>([]);
   const [provider, setProvider] = useState<{ label: string; model: string } | null | undefined>(undefined);
   const [providers, setProviders] = useState<ProviderOption[]>([]);
-  const [selectedProviderId, setSelectedProviderId] = useState<string>("");
+  const [selectedModelKey, setSelectedModelKey] = useState("");
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -137,8 +159,12 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           setHistoryError(data.historyError ?? null);
           if (data.providers) {
             setProviders(data.providers);
-            // Preselect the member's default provider (★) for the conversation.
-            setSelectedProviderId((cur) => cur || data.providers?.find((p) => p.is_default)?.id || data.providers?.[0]?.id || "");
+            const pairs = (data.providers ?? []).flatMap((p: ProviderOption) =>
+              (p.models?.length ? p.models : [p.model]).map((m: string) => `${p.id}|${m}`),
+            );
+            // Preselect the member's default provider (★) × its default model.
+            const def = data.providers?.find((p: ProviderOption) => p.is_default) ?? data.providers?.[0];
+            setSelectedModelKey((cur: string) => (cur && pairs.includes(cur) ? cur : def ? `${def.id}|${def.model}` : ""));
           }
           if (data.conversations) setConversations(data.conversations);
           if (data.activeConversationId !== undefined) setConversationId(data.activeConversationId);
@@ -183,7 +209,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             message: trimmed,
-            ...(selectedProviderId ? { provider_id: selectedProviderId } : {}),
+            ...splitModelKey(selectedModelKey),
             ...(conversationId ? { conversation_id: conversationId } : {}),
           }),
           signal: ac.signal,
@@ -243,7 +269,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             action: proposal.action,
-            ...(selectedProviderId ? { provider_id: selectedProviderId } : {}),
+            ...splitModelKey(selectedModelKey),
             ...(conversationId ? { conversation_id: conversationId } : {}),
           }),
         });
@@ -268,6 +294,18 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
     ]);
   }
 
+  // Every (provider, model) pair the member can switch to: the saved catalog
+  // when one was fetched, otherwise the provider's default model.
+  const modelPairs: ModelPair[] = providers.flatMap((p) =>
+    (p.models?.length ? p.models : [p.model]).map((m) => ({
+      key: `${p.id}|${m}`,
+      providerId: p.id,
+      model: m,
+      label: p.label,
+      is_default: p.is_default,
+    })),
+  );
+
   const threadEmpty = messages.filter((m) => m.role !== "system").length === 0;
 
   return (
@@ -290,18 +328,18 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
         <div className="relative flex items-center justify-between border-b-2 border-neutral-900 bg-yellow-300 px-4 py-3">
           <div className="min-w-0">
             <p className="text-sm font-extrabold uppercase tracking-wide text-neutral-900">✨ Rasoi AI</p>
-            {providers.length >= 1 ? (
+            {modelPairs.length >= 1 ? (
               <select
-                value={selectedProviderId}
-                onChange={(e) => setSelectedProviderId(e.target.value)}
+                value={selectedModelKey}
+                onChange={(e) => setSelectedModelKey(e.target.value)}
                 aria-label="Model for this conversation"
                 title="Model for this conversation — your app-wide default in Settings is untouched"
                 className="mt-1 w-full max-w-[190px] truncate rounded-none border-2 border-neutral-900 bg-white px-1 py-0.5 text-[10px] font-bold text-neutral-900 focus:outline-none"
               >
-                {providers.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.is_default ? "★ " : ""}
-                    {p.label} · {p.model}
+                {modelPairs.map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.is_default ? "★ " : ""}
+                    {o.label} · {o.model}
                   </option>
                 ))}
               </select>

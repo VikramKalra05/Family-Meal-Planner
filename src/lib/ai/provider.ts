@@ -100,7 +100,7 @@ export class ProviderError extends Error {
  * per-conversation id satisfies it — we use the provider row id so a
  * member's calls route consistently. No-op for every other provider.
  */
-function opencodeSessionHeaders(baseUrl: string, sessionId: string): Record<string, string> {
+export function opencodeSessionHeaders(baseUrl: string, sessionId: string): Record<string, string> {
   return /opencode\.ai/i.test(baseUrl) ? { "x-opencode-session": sessionId } : {};
 }
 

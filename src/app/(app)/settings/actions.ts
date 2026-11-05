@@ -16,7 +16,24 @@ const providerFormSchema = z.object({
   base_url: z.string().trim().url("Base URL must be a valid URL").max(200),
   model: z.string().trim().min(1, "Model is required").max(80),
   api_key: z.string().trim().min(8, "API key looks too short").max(300),
+  /** Optional JSON array from the fetched-models picker; the primary `model` is the default. */
+  models_json: z.string().optional(),
 });
+
+/** Parses the picker's JSON payload into a clean, deduped model-id list. */
+function parseModelsList(raw: string | undefined, primaryModel: string): string[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    const list = Array.isArray(arr)
+      ? arr.filter((m): m is string => typeof m === "string" && m.trim().length > 0 && m.length <= 120)
+      : [];
+    const set = new Set([primaryModel, ...list.map((m) => m.trim())]);
+    return [...set].slice(0, 80);
+  } catch {
+    return [];
+  }
+}
 
 export async function addAiProvider(
   _prev: ProviderActionState,
@@ -39,6 +56,7 @@ export async function addAiProvider(
     label: parsed.data.label,
     base_url: parsed.data.base_url.replace(/\/+$/, ""),
     model: parsed.data.model,
+    models: parseModelsList(parsed.data.models_json, parsed.data.model),
     api_key_encrypted: encryptSecret(parsed.data.api_key),
     is_default: (count ?? 0) === 0,
   });
@@ -85,6 +103,7 @@ export async function updateAiProvider(
       label: v.label,
       base_url: v.base_url.replace(/\/+$/, ""),
       model: v.model,
+      models: parseModelsList(v.models_json, v.model),
       ...(v.api_key ? { api_key_encrypted: encryptSecret(v.api_key) } : {}),
     })
     .eq("id", v.id)

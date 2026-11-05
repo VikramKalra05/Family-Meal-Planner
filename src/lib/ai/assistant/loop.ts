@@ -165,8 +165,13 @@ async function ensureConversation(
 export async function resolveChatProvider(
   providerId: string | undefined,
   profile: Profile,
+  modelOverride?: string,
 ): Promise<ResolvedProvider | null> {
-  if (!providerId) return resolveProvider();
+  if (!providerId) {
+    const base = await resolveProvider();
+    if (!base) return null;
+    return modelOverride ? { ...base, model: modelOverride } : base;
+  }
   const supabase = await createClient();
   const { data: row } = await supabase
     .from("ai_providers")
@@ -182,7 +187,7 @@ export async function resolveChatProvider(
       label: row.label,
       baseUrl: row.base_url.replace(/\/+$/, ""),
       apiKey: decryptSecret(row.api_key_encrypted),
-      model: row.model,
+      model: modelOverride ?? row.model,
       source: "user",
     };
   } catch {

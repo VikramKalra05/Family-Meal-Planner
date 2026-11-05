@@ -2,6 +2,7 @@
 
 import { useActionState, useState, useTransition } from "react";
 import { addAiProvider, testRawProvider } from "./actions";
+import { ModelPicker } from "./model-picker";
 import { AiWorking } from "@/components/ai-working";
 
 const input =
@@ -21,6 +22,7 @@ const PRESETS: { name: string; baseUrl: string; model: string }[] = [
 
 export function AddProviderForm() {
   const [state, action, pending] = useActionState(addAiProvider, { error: null, ok: null });
+  const [modelsJson, setModelsJson] = useState("[]");
   const [preset, setPreset] = useState(0);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testing, startTesting] = useTransition();
@@ -68,6 +70,15 @@ export function AddProviderForm() {
         <label className={label} htmlFor="purl">Base URL (OpenAI-compatible)</label>
         <input id="purl" name="base_url" required defaultValue={p.baseUrl} key={`url-${preset}`} className={`${input} font-mono text-xs`} />
       </div>
+      <ModelPicker
+        getCredentials={() => ({
+          base_url: (document.getElementById("purl") as HTMLInputElement | null)?.value ?? "",
+          api_key: (document.getElementById("pkey") as HTMLInputElement | null)?.value ?? "",
+        })}
+        initialModels={[]}
+        onModelsChange={(models) => setModelsJson(JSON.stringify(models))}
+      />
+      <input type="hidden" name="models_json" value={modelsJson} />
       <div>
         <label className={label} htmlFor="pkey">API key</label>
         <input id="pkey" name="api_key" type="password" required autoComplete="off" className={`${input} font-mono text-xs`} placeholder="sk-…" />
