@@ -95,6 +95,16 @@ export class ProviderError extends Error {
 }
 
 /**
+ * OpenCode (zen/go endpoints) routes requests by session and rejects with
+ * MissingSessionID when `x-opencode-session` is absent. Any stable
+ * per-conversation id satisfies it — we use the provider row id so a
+ * member's calls route consistently. No-op for every other provider.
+ */
+function opencodeSessionHeaders(baseUrl: string, sessionId: string): Record<string, string> {
+  return /opencode\.ai/i.test(baseUrl) ? { "x-opencode-session": sessionId } : {};
+}
+
+/**
  * One chat completion against any OpenAI-compatible endpoint
  * (Z.ai GLM, OpenAI, Gemini, Groq, OpenRouter, Ollama…). When `json` is set,
  * the response is coerced to an object with fence-stripping so providers
@@ -118,6 +128,7 @@ export async function chatComplete(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${provider.apiKey}`,
+        ...opencodeSessionHeaders(provider.baseUrl, provider.id ?? `fmp-demo-${provider.model}`),
       },
       body: JSON.stringify({
         model: provider.model,
@@ -295,10 +306,13 @@ export async function testProviderCreds(
   // gateways, sleepy serverless endpoints) — retry once before giving up.
   const slow = (err: Error) => err.name === "AbortError" || err.name === "TimeoutError";
 
+  // OpenCode needs a routing session even for tests; the provider row id is
+  // the stable choice when known, otherwise a one-off id for this test.
+  const sessionHeaders = opencodeSessionHeaders(endpoint, usageCtx?.providerId ?? crypto.randomUUID());
   async function attempt(body: Record<string, unknown>): Promise<Response> {
     return fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, ...sessionHeaders },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });

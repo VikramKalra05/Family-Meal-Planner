@@ -17,6 +17,7 @@ const PRICES: ModelPrice[] = [
   // Local / free
   { pattern: /(^|[/:])ollama|local|llama\.?cpp|lmstudio/i, inputPerMTok: 0, outputPerMTok: 0 },
   { pattern: /:free$/i, inputPerMTok: 0, outputPerMTok: 0 },
+  { pattern: /big-pickle/i, inputPerMTok: 0, outputPerMTok: 0 }, // OpenCode Go stealth model, $0 while in preview
 
   // Google Gemini (specific first)
   { pattern: /gemini.*flash.*lite/i, inputPerMTok: 0.075, outputPerMTok: 0.3 },
