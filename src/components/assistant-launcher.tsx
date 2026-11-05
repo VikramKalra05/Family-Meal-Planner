@@ -30,6 +30,12 @@ interface ProviderOption {
   is_default: boolean;
 }
 
+interface ConversationSummary {
+  id: string;
+  title: string;
+  created_at: string;
+}
+
 interface PanelMessage {
   key: string;
   role: "user" | "assistant" | "system";
@@ -83,6 +89,9 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
   const [provider, setProvider] = useState<{ label: string; model: string } | null | undefined>(undefined);
   const [providers, setProviders] = useState<ProviderOption[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState<string>("");
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
@@ -109,14 +118,17 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
 
   // Load (or reload) the persisted thread. Async state updates land in
   // promise callbacks — no synchronous setState inside the effect.
-  function fetchThread() {
+  function fetchThread(conversation?: string | null) {
     setHistoryLoading(true);
-    fetch("/api/ai/chat")
+    const qs = conversation ? `?conversation=${encodeURIComponent(conversation)}` : "";
+    fetch(`/api/ai/chat${qs}`)
       .then((r) => r.json())
       .then(
         (data: {
           provider: { label: string; model: string } | null;
           providers?: ProviderOption[];
+          conversations?: ConversationSummary[];
+          activeConversationId?: string | null;
           messages?: StoredRow[];
           historyError?: string | null;
           error?: string;
@@ -128,6 +140,8 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
             // Preselect the member's default provider (★) for the conversation.
             setSelectedProviderId((cur) => cur || data.providers?.find((p) => p.is_default)?.id || data.providers?.[0]?.id || "");
           }
+          if (data.conversations) setConversations(data.conversations);
+          if (data.activeConversationId !== undefined) setConversationId(data.activeConversationId);
           if (data.messages) {
             setMessages(
               data.messages.map((m, i) => ({
@@ -167,7 +181,11 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
         const res = await fetch("/api/ai/chat", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ message: trimmed, ...(selectedProviderId ? { provider_id: selectedProviderId } : {}) }),
+          body: JSON.stringify({
+            message: trimmed,
+            ...(selectedProviderId ? { provider_id: selectedProviderId } : {}),
+            ...(conversationId ? { conversation_id: conversationId } : {}),
+          }),
           signal: ac.signal,
         });
         const data = (await res.json()) as {
@@ -176,7 +194,15 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           proposal?: Proposal | null;
           error?: string;
           stopped?: boolean;
+          conversationId?: string | null;
         };
+        if (data.conversationId) {
+          const newId = data.conversationId;
+          setConversationId(newId);
+          setConversations((prev) =>
+            prev.some((c) => c.id === newId) ? prev : [{ id: newId, title: trimmed.slice(0, 48), created_at: new Date().toISOString() }, ...prev],
+          );
+        }
         if (data.stopped) {
           setMessages((prev) => [...prev, { key: `s${Date.now()}`, role: "system", content: "⏹ Stopped — the partial answer was discarded." }]);
         } else if (!res.ok || data.error) {
@@ -215,7 +241,11 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
         const res = await fetch("/api/ai/chat/act", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ action: proposal.action, ...(selectedProviderId ? { provider_id: selectedProviderId } : {}) }),
+          body: JSON.stringify({
+            action: proposal.action,
+            ...(selectedProviderId ? { provider_id: selectedProviderId } : {}),
+            ...(conversationId ? { conversation_id: conversationId } : {}),
+          }),
         });
         const data = (await res.json()) as { ok?: boolean; message?: string; error?: string };
         const message = data.message ?? data.error ?? "Done.";
@@ -257,16 +287,16 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
         className="flex w-full flex-col border-l-2 border-neutral-900 bg-white max-md:fixed max-md:bottom-16 max-md:right-0 max-md:top-0 max-md:z-40 max-md:shadow-[-6px_6px_0_#111] md:relative md:h-full md:w-[340px] md:shrink-0 md:shadow-[-6px_0_0_#111] xl:w-[400px]"
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b-2 border-neutral-900 bg-yellow-300 px-4 py-3">
+        <div className="relative flex items-center justify-between border-b-2 border-neutral-900 bg-yellow-300 px-4 py-3">
           <div className="min-w-0">
             <p className="text-sm font-extrabold uppercase tracking-wide text-neutral-900">✨ Rasoi AI</p>
-            {providers.length >= 2 ? (
+            {providers.length >= 1 ? (
               <select
                 value={selectedProviderId}
                 onChange={(e) => setSelectedProviderId(e.target.value)}
                 aria-label="Model for this conversation"
                 title="Model for this conversation — your app-wide default in Settings is untouched"
-                className="mt-1 w-full max-w-[210px] truncate rounded-none border-2 border-neutral-900 bg-white px-1 py-0.5 text-[10px] font-bold text-neutral-900 focus:outline-none"
+                className="mt-1 w-full max-w-[190px] truncate rounded-none border-2 border-neutral-900 bg-white px-1 py-0.5 text-[10px] font-bold text-neutral-900 focus:outline-none"
               >
                 {providers.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -281,15 +311,29 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
               </p>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={() => void fetchThread()}
+              onClick={() => {
+                setConversationId(null);
+                setMessages([]);
+                setHistoryOpen(false);
+                setError(null);
+              }}
+              title="Start a fresh conversation"
+              className="rounded-none border-2 border-neutral-900 bg-white px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+            >
+              + New
+            </button>
+            <button
+              type="button"
+              onClick={() => setHistoryOpen((v) => !v)}
+              aria-expanded={historyOpen}
               disabled={historyLoading}
-              title="Reload your previous chats"
+              title="Previous chats"
               className="rounded-none border-2 border-neutral-900 bg-white px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none disabled:opacity-50"
             >
-              {historyLoading ? "◌ Loading…" : "⟳ History"}
+              {historyLoading ? "◌…" : "☰ Chats"}
             </button>
             <button
               type="button"
@@ -300,6 +344,38 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
               ✕
             </button>
           </div>
+          {historyOpen && (
+            <div className="absolute inset-x-3 top-full z-10 mt-1 border-2 border-neutral-900 bg-white shadow-[4px_4px_0_#111]">
+              <p className="border-b border-neutral-200 px-3 py-1.5 text-[9px] font-extrabold uppercase tracking-widest text-neutral-400">
+                Previous chats
+              </p>
+              {conversations.length === 0 ? (
+                <p className="px-3 py-2 text-xs text-neutral-500">No previous chats yet.</p>
+              ) : (
+                <div className="max-h-56 overflow-y-auto">
+                  {conversations.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        setHistoryOpen(false);
+                        setConversationId(c.id);
+                        fetchThread(c.id);
+                      }}
+                      className={`block w-full truncate px-3 py-2 text-left text-xs font-semibold transition-colors ${
+                        c.id === conversationId ? "bg-yellow-300 text-neutral-900" : "text-neutral-700 hover:bg-amber-50"
+                      }`}
+                    >
+                      {c.title}
+                      <span className="ml-1 text-[9px] font-normal text-neutral-400">
+                        {new Date(c.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Thread */}

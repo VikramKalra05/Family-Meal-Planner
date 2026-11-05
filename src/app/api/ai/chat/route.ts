@@ -3,17 +3,23 @@ import { z } from "zod";
 import { getProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
 import { checkRate, rateLimited } from "@/lib/rate-limit";
-import { loadThread, resolveChatProvider, runAssistantTurn } from "@/lib/ai/assistant/loop";
+import {
+  listConversations,
+  loadThread,
+  resolveChatProvider,
+  runAssistantTurn,
+} from "@/lib/ai/assistant/loop";
 import { resolveProvider } from "@/lib/ai/provider";
 
-/** Panel bootstrap: provider list, thread history + the active provider. */
-export async function GET() {
+/** Panel bootstrap: conversations list, provider list + the active thread. */
+export async function GET(req: Request) {
   const profile = await getProfile();
   if (!profile?.household_id) {
     return NextResponse.json({ error: "Finish setting up your profile first." }, { status: 403 });
   }
+  const requested = new URL(req.url).searchParams.get("conversation");
   const supabase = await createClient();
-  const [providerRes, providersRes] = await Promise.all([
+  const [providerRes, providersRes, conversations] = await Promise.all([
     resolveProvider(),
     supabase
       .from("ai_providers")
@@ -21,11 +27,21 @@ export async function GET() {
       .eq("user_id", profile.id)
       .order("is_default", { ascending: false })
       .order("created_at"),
+    listConversations(profile.id),
   ]);
-  const { messages, error: historyError } = await loadThread(profile.id);
+  // Active thread: the requested conversation (if owned), else the most recent.
+  const activeConversationId =
+    (requested && conversations.some((c) => c.id === requested) ? requested : null) ??
+    conversations[0]?.id ??
+    null;
+  const { messages, error: historyError } = activeConversationId
+    ? await loadThread(profile.id, activeConversationId)
+    : { messages: [], error: null };
   return NextResponse.json({
     provider: providerRes ? { label: providerRes.label, model: providerRes.model } : null,
     providers: providersRes.data ?? [],
+    conversations,
+    activeConversationId,
     messages,
     historyError,
   });
@@ -35,6 +51,8 @@ const askSchema = z.object({
   message: z.string().trim().min(1, "Type something first").max(1000),
   /** Optional model-changer pick (ai_providers.id); default provider when omitted. */
   provider_id: z.string().uuid().optional(),
+  /** Conversation to append to; omitted/null = start a new chat. */
+  conversation_id: z.string().uuid().nullable().optional(),
 });
 
 /** One assistant turn. */
@@ -69,7 +87,13 @@ export async function POST(req: Request) {
   try {
     // req.signal fires when the client disconnects (Stop button aborts the
     // fetch) — the loop then cancels the LLM call and skips further steps.
-    const result = await runAssistantTurn(body.data.message, profile, provider, req.signal);
+    const result = await runAssistantTurn(
+      body.data.message,
+      profile,
+      provider,
+      req.signal,
+      body.data.conversation_id ?? null,
+    );
     return NextResponse.json(result);
   } catch (e) {
     console.error("[rasoi] turn failed:", e);

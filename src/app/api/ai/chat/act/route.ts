@@ -9,6 +9,8 @@ const actSchema = z.object({
   action: assistantActionSchema,
   /** Chosen model (panel dropdown) — used by mutations that call the LLM (log_meal). */
   provider_id: z.string().uuid().optional(),
+  /** Conversation the confirmed action belongs to (for the thread note). */
+  conversation_id: z.string().uuid().nullable().optional(),
 });
 
 /**
@@ -40,7 +42,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await runConfirmedAction(body.data.action, profile, provider);
+    const result = await runConfirmedAction(body.data.action, profile, provider, body.data.conversation_id ?? null);
     return NextResponse.json(result);
   } catch (e) {
     console.error("[rasoi] confirmed action failed:", e);
