@@ -34,6 +34,7 @@ export interface Profile {
   target_weight_kg: number | null;
   weigh_in_time: string | null;
   chat_language: string | null;
+  assistant_privacy_mode: boolean;
   targets_cache: TargetsResult | null;
   targets_version: number;
   created_at: string;

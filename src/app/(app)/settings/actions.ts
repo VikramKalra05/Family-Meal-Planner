@@ -108,6 +108,33 @@ export async function saveChatLanguage(
   return { ok: true };
 }
 
+/** Toggles assistant privacy mode (weights/allergies never reach the AI provider). */
+export async function saveAssistantPrivacyMode(
+  enabled: boolean,
+): Promise<{ ok: boolean; error?: string }> {
+  const user = await getUser();
+  if (!user) return { ok: false, error: "Not signed in" };
+  const parsed = z.boolean().safeParse(enabled);
+  if (!parsed.success) return { ok: false, error: "Invalid toggle value." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("profiles")
+    .update({ assistant_privacy_mode: parsed.data })
+    .eq("id", user.id);
+  if (error) {
+    // Migration gap: the column doesn't exist yet — name the exact file to run.
+    if (error.message.includes("assistant_privacy_mode")) {
+      return {
+        ok: false,
+        error: "Privacy mode isn't installed yet — run supabase/migrations/0015_assistant_privacy_mode.sql in the Supabase SQL editor first.",
+      };
+    }
+    return { ok: false, error: error.message };
+  }
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
 const updateProviderSchema = providerFormSchema.extend({
   id: z.string().uuid(),
   api_key: z

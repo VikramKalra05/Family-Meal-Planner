@@ -3,6 +3,7 @@ import { ageFromDob } from "@/lib/age";
 import { deleteAiProvider, setDefaultAiProvider } from "./actions";
 import { AddProviderForm } from "./provider-form";
 import { LanguageForm } from "./language-form";
+import { PrivacyForm } from "./privacy-form";
 import { TestSavedButton } from "./test-saved-button";
 import { SubmitButton } from "@/components/submit-button";
 import { requireFullProfile } from "@/lib/profile";
@@ -242,6 +243,9 @@ export default async function SettingsPage() {
         </div>
         <div className="border-t-2 border-neutral-900 p-6">
           <LanguageForm initial={profile.chat_language} />
+        </div>
+        <div className="border-t-2 border-neutral-900 p-6">
+          <PrivacyForm initial={profile.assistant_privacy_mode} />
         </div>
       </section>
     </div>

@@ -304,6 +304,13 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
     }
 
     case "query_weight": {
+      if (profile.assistant_privacy_mode) {
+        return {
+          ok: true,
+          message: "Weight details are hidden by privacy mode",
+          data: { privacy_mode: true },
+        };
+      }
       const { data } = await supabase
         .from("weight_logs")
         .select("logged_on, weight_kg")
@@ -329,15 +336,18 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
     }
 
     case "query_family": {
+      // Privacy: no invite_code (a join credential) and no message bodies —
+      // only titles — may transit to the AI provider.
+      const privacyOn = profile.assistant_privacy_mode === true;
       const [membersRes, inviteRes, unreadRes] = await Promise.all([
         supabase
           .from("profiles")
           .select("id, display_name, role, diet_type, allergies, targets_cache")
           .eq("household_id", profile.household_id!),
-        supabase.from("households").select("name, invite_code").eq("id", profile.household_id!).maybeSingle(),
+        supabase.from("households").select("name").eq("id", profile.household_id!).maybeSingle(),
         supabase
           .from("messages")
-          .select("title, body, kind, created_at, profiles(id)")
+          .select("title, kind, created_at, profiles(id)")
           .or(`to_member.is.null,to_member.eq.${profile.id}`)
           .is("read_at", null)
           .neq("from_member", profile.id)
@@ -353,19 +363,17 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
         message: "Checked the family",
         data: {
           household: inviteRes?.data?.name ?? null,
-          invite_code: inviteRes?.data?.invite_code ?? null,
           members: (membersRes.data ?? []).map((m) => ({
             member: labels.get(m.id) ?? "a member",
             role: m.role,
             diet: m.diet_type,
-            allergies: m.allergies ?? [],
+            ...(privacyOn ? {} : { allergies: m.allergies ?? [] }),
             target_kcal: (m.targets_cache as { targets?: { kcal?: number } } | null)?.targets?.kcal ?? null,
           })),
           unread_messages: (unreadRes.data ?? []).map((m) => ({
             from: labels.get((m.profiles as unknown as { id: string } | null)?.id ?? "") ?? "a member",
             kind: m.kind,
             title: m.title,
-            body: m.body,
           })),
         },
       };

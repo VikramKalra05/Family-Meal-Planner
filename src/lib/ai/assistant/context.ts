@@ -6,6 +6,32 @@ import { weightTrend } from "@/lib/weight";
 import { memberLabels } from "./labels";
 
 /**
+ * Privacy mode: strips the sensitive data classes (weight, allergies) from a
+ * built snapshot so they never transit to the AI provider. Pure and exported
+ * for tests. Targets (kcal/macros) are kept — planning needs them.
+ */
+export function applyAssistantPrivacy(
+  snapshot: Record<string, unknown>,
+  on: boolean,
+): Record<string, unknown> {
+  if (!on) return snapshot;
+  const s = { ...snapshot };
+  const me = { ...((s.me as Record<string, unknown> | undefined) ?? {}) };
+  delete me.allergies;
+  delete me.target_weight_kg;
+  s.me = me;
+  if (Array.isArray(s.family)) {
+    s.family = (s.family as Record<string, unknown>[]).map((f) => {
+      const rest = { ...f };
+      delete rest.allergies;
+      return rest;
+    });
+  }
+  delete s.weight;
+  return s;
+}
+
+/**
  * Compact, grounding snapshot of the household's current state, embedded in
  * the assistant's system prompt each turn so most natural questions answer
  * without extra tool hops. Tool actions exist for everything beyond this.
@@ -92,7 +118,7 @@ export async function buildContextSnapshot(profile: Profile): Promise<Record<str
   }));
   const trend = weights.length >= 4 ? weightTrend([...weights].reverse()) : null;
 
-  return {
+  const snapshot: Record<string, unknown> = {
     now: {
       today,
       today_label: formatIstDate(today),
@@ -129,4 +155,7 @@ export async function buildContextSnapshot(profile: Profile): Promise<Record<str
     },
     unread_family_messages: unreadRes.count ?? 0,
   };
+
+  // Privacy mode gates what transits to the provider (weights, allergies).
+  return applyAssistantPrivacy(snapshot, profile.assistant_privacy_mode === true);
 }
