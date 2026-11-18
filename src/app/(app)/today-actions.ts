@@ -184,7 +184,9 @@ export async function aiLogIntakeAction(
         { role: "system", content: AI_LOG_SYSTEM },
         { role: "user", content: text.data },
       ],
-      { maxTokens: 900, temperature: 0.2, feature: "meal_log" },
+      // Reasoning models burn part of the budget before writing JSON, so this
+      // needs generous headroom — 900 produced empty completions.
+      { maxTokens: 2500, temperature: 0.2, feature: "meal_log" },
     );
     items = parsed.items;
   } catch (e) {

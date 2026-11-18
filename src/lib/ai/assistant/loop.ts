@@ -238,7 +238,8 @@ export async function runAssistantTurn(
     let turn;
     try {
       turn = await chatJson(provider, chatTurnSchema, messages, {
-        maxTokens: 1400,
+        // Headroom for reasoning models: thinking counts inside max_tokens.
+        maxTokens: 3000,
         temperature: 0.3,
         feature: "assistant",
       });
@@ -290,7 +291,7 @@ export async function runAssistantTurn(
   messages.push({ role: "user", content: "Tool budget reached. Answer the user now from what you have, with NO actions." });
   try {
     const finalTurn = await chatJson(provider, chatTurnSchema, messages, {
-      maxTokens: 1200,
+      maxTokens: 2500,
       temperature: 0.3,
       feature: "assistant",
     });

@@ -495,7 +495,9 @@ export async function executeMutationAction(
             { role: "system", content: MEAL_PARSE_SYSTEM },
             { role: "user", content: action.text },
           ],
-          { maxTokens: 900, temperature: 0.2, feature: "assistant" },
+          // Reasoning models burn part of the budget before writing JSON, so
+          // this needs generous headroom — 900 produced empty completions.
+          { maxTokens: 2500, temperature: 0.2, feature: "assistant" },
         );
         items = parsed.items;
       } catch (e) {
