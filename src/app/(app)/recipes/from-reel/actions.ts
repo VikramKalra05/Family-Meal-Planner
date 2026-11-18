@@ -143,7 +143,7 @@ export async function importDraftRecipe(draftInput: DraftRecipe & { source_url?:
           provider,
           estimatedIngredientSchema,
           estimateMessages({ name }),
-          { maxTokens: 400, feature: "ingredient_estimate" },
+          { maxTokens: 1200, feature: "ingredient_estimate" },
         );
         return { name, est };
       }),

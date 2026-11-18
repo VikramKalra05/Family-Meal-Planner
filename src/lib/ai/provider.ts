@@ -113,7 +113,15 @@ export function opencodeSessionHeaders(baseUrl: string, sessionId: string): Reco
 export async function chatComplete(
   provider: ResolvedProvider,
   messages: ChatMessage[],
-  opts: { json?: boolean; maxTokens?: number; temperature?: number; feature?: string; signal?: AbortSignal } = {},
+  opts: {
+    json?: boolean;
+    maxTokens?: number;
+    temperature?: number;
+    feature?: string;
+    signal?: AbortSignal;
+    /** Internal: marks the one-shot retry after a truncated (finish_reason "length") answer. */
+    lengthRetried?: boolean;
+  } = {},
 ): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
@@ -164,10 +172,14 @@ export async function chatComplete(
     }
 
     const data = (await res.json()) as {
-      choices?: { message?: { content?: string | { text?: string }[] } }[];
+      choices?: {
+        message?: { content?: string | { text?: string }[]; reasoning_content?: string };
+        finish_reason?: string;
+      }[];
       usage?: unknown;
     };
-    const raw = data.choices?.[0]?.message?.content;
+    const choice = data.choices?.[0];
+    const raw = choice?.message?.content;
     // Some gateways return content as an array of parts — normalize to text.
     const content =
       typeof raw === "string"
@@ -175,10 +187,10 @@ export async function chatComplete(
         : Array.isArray(raw)
           ? raw.map((part) => part?.text ?? "").join("")
           : undefined;
-    if (!content) throw new ProviderError("Provider returned an empty completion.");
 
-    // Every feature call lands in the usage ledger; a failed insert is logged
-    // but never breaks the model response.
+    // Truncated turns are still billed (the hidden reasoning was generated),
+    // so they land in the ledger as well — otherwise reasoning-model retries
+    // would silently under-report spend.
     await recordAiUsage(
       {
         userId: provider.userId,
@@ -189,8 +201,29 @@ export async function chatComplete(
         baseUrl: provider.baseUrl,
         free: provider.source === "env-demo",
       },
-      normalizeUsage(data.usage, messages, content),
+      normalizeUsage(data.usage, messages, content ?? ""),
     );
+
+    if (!content) {
+      const maxTokens = opts.maxTokens ?? 2000;
+      // Reasoning models (deepseek-v4.1-flash, o-series, …) spend max_tokens
+      // on hidden reasoning BEFORE writing any visible content. Too small a
+      // cap ends the turn mid-thought: finish_reason "length", content "".
+      // Retry once with double the room; if that still truncates, fail with
+      // an actionable message instead of a cryptic "empty completion".
+      if (choice?.finish_reason === "length" && !opts.lengthRetried && maxTokens < 8000) {
+        return chatComplete(provider, messages, {
+          ...opts,
+          maxTokens: Math.min(maxTokens * 2, 8000),
+          lengthRetried: true,
+        });
+      }
+      throw new ProviderError(
+        choice?.finish_reason === "length"
+          ? "The model ran out of tokens while thinking and never answered — raise the token budget or pick a non-reasoning model from the ✨ dropdown."
+          : "Provider returned an empty completion.",
+      );
+    }
 
     return content;
   } catch (e) {
