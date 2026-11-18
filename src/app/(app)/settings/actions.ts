@@ -8,13 +8,25 @@ import { testProviderCreds } from "@/lib/ai/provider";
 import { getUser } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
 import { checkRate, rateLimited } from "@/lib/rate-limit";
+import { isAllowedAiBaseUrl } from "@/lib/security";
 import { CHAT_LANGUAGE_CODES } from "@/lib/ai/assistant/languages";
 
 export type ProviderActionState = { error: string | null; ok: string | null };
 
+/** How many BYO providers a member may keep at once. */
+const MAX_PROVIDERS = 10;
+
 const providerFormSchema = z.object({
   label: z.string().trim().min(2, "Label is required").max(40),
-  base_url: z.string().trim().url("Base URL must be a valid URL").max(200),
+  base_url: z
+    .string()
+    .trim()
+    .url("Base URL must be a valid URL")
+    .max(200)
+    .refine(
+      isAllowedAiBaseUrl,
+      "That base URL resolves to a private address — use a public http(s) endpoint.",
+    ),
   model: z.string().trim().min(1, "Model is required").max(80),
   api_key: z.string().trim().min(8, "API key looks too short").max(300),
   /** Optional JSON array from the fetched-models picker; the primary `model` is the default. */
@@ -66,6 +78,12 @@ export async function addAiProvider(
     .from("ai_providers")
     .select("id", { count: "exact", head: true })
     .eq("user_id", user.id);
+  if ((count ?? 0) >= MAX_PROVIDERS) {
+    return {
+      error: `You can save up to ${MAX_PROVIDERS} providers — delete one you no longer use first.`,
+      ok: null,
+    };
+  }
 
   const { error } = await supabase.from("ai_providers").insert({
     user_id: user.id,
@@ -258,6 +276,12 @@ export async function testProviderUpdate(
   if (!parsedId.success || !url.success || !model.trim()) {
     return { ok: false, error: "Fill base URL and model first" };
   }
+  if (!isAllowedAiBaseUrl(url.data)) {
+    return {
+      ok: false,
+      error: "That base URL resolves to a private address — use a public http(s) endpoint.",
+    };
+  }
 
   const supabase = await createClient();
   const { data: row } = await supabase
@@ -289,9 +313,15 @@ export async function testRawProvider(
   const user = await getUser();
   if (!user) return { ok: false, error: "Not signed in" };
   if (!checkRate(`testraw:${user.id}`, 10, 60 * 60 * 1000)) return { ok: false, error: rateLimited(10, 60 * 60 * 1000) };
-  const url = z.string().url().safeParse(base_url);
+  const url = z.string().trim().url().safeParse(base_url);
   if (!url.success || api_key.length < 8 || !model.trim()) {
     return { ok: false, error: "Fill base URL, API key and model first" };
+  }
+  if (!isAllowedAiBaseUrl(url.data)) {
+    return {
+      ok: false,
+      error: "That base URL resolves to a private address — use a public http(s) endpoint.",
+    };
   }
   return testProviderCreds(url.data, api_key, model.trim(), {
     userId: user.id,

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/profile";
 import { decryptSecret } from "@/lib/crypto";
+import { isAllowedAiBaseUrl } from "@/lib/security";
 import { normalizeUsage } from "./tokens";
 import { recordAiUsage } from "./usage-store";
 
@@ -123,6 +124,13 @@ export async function chatComplete(
     lengthRetried?: boolean;
   } = {},
 ): Promise<string> {
+  // SSRF defense at the sink: a provider row can be edited directly through
+  // PostgREST, so write-time validation alone is not enough.
+  if (!isAllowedAiBaseUrl(provider.baseUrl)) {
+    throw new ProviderError(
+      "This provider's base URL is not allowed — use a public http(s) endpoint in Settings.",
+    );
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
   // External stop (assistant Stop button / client disconnect) joins the same
@@ -339,6 +347,14 @@ export async function testProviderCreds(
   },
 ): Promise<{ ok: true; latencyMs: number } | { ok: false; error: string }> {
   const started = Date.now();
+  // Same sink-side guard as chatComplete — test connections must not become
+  // an internal-network prober.
+  if (!isAllowedAiBaseUrl(baseUrl)) {
+    return {
+      ok: false,
+      error: "That base URL resolves to a private address — use a public http(s) endpoint.",
+    };
+  }
   const endpoint = `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
   const TIMEOUT_MS = 30_000;
 

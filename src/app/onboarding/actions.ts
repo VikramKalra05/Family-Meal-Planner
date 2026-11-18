@@ -110,6 +110,10 @@ export async function createHousehold(_prev: ActionState, formData: FormData): P
   const name = householdNameSchema.safeParse(formData.get("name"));
   if (!name.success) return { error: name.error.issues[0]?.message ?? "Invalid name" };
 
+  if (!checkRate(`household:${user.id}`, 5, 24 * 60 * 60 * 1000)) {
+    return { error: rateLimited(5, 24 * 60 * 60 * 1000) };
+  }
+
   const { data: household, error: insertErr } = await supabase
     .from("households")
     .insert({ name: name.data, created_by: user.id })

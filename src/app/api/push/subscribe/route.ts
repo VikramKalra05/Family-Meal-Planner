@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { checkRate, rateLimited } from "@/lib/rate-limit";
+import { isAllowedPushEndpoint } from "@/lib/security";
 
 const subscriptionSchema = z.object({
   endpoint: z
     .string()
     .url("Must be a valid URL")
-    .refine((v) => /^https:\/\//i.test(v), "Push endpoints must be https")
+    .refine(isAllowedPushEndpoint, "That push endpoint is not a recognised push service")
     .max(1000),
   keys: z.object({
     p256dh: z.string().min(1).max(400),
@@ -24,6 +26,10 @@ export async function POST(req: Request) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+
+  if (!checkRate(`push-sub:${user.id}`, 20, 5 * 60_000)) {
+    return NextResponse.json({ error: rateLimited(20, 5 * 60_000) }, { status: 429 });
+  }
 
   const parsed = subscriptionSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
