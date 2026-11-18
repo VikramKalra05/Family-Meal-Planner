@@ -173,16 +173,43 @@ export async function resolveChatProvider(
   if (!providerId) {
     const base = await resolveProvider();
     if (!base) return null;
-    return modelOverride ? { ...base, model: modelOverride } : base;
+    // The demo provider is server-configured: never let a client choose its
+    // model — arbitrary (expensive) ids would run on the owner's key.
+    return base;
   }
   const supabase = await createClient();
-  const { data: row } = await supabase
+  type ProviderRow = {
+    id: string;
+    label: string;
+    base_url: string;
+    api_key_encrypted: string;
+    model: string;
+    models?: string[] | null;
+  };
+  const first = await supabase
     .from("ai_providers")
-    .select("id, label, base_url, api_key_encrypted, model")
+    .select("id, label, base_url, api_key_encrypted, model, models")
     .eq("id", providerId)
     .eq("user_id", profile.id)
     .maybeSingle();
+  let row = first.data as unknown as ProviderRow | null;
+  // Migration 0012 not applied? Fall back to the base columns; overrides are
+  // then limited to the provider's default model.
+  if (first.error && /models/i.test(first.error.message)) {
+    const fallback = await supabase
+      .from("ai_providers")
+      .select("id, label, base_url, api_key_encrypted, model")
+      .eq("id", providerId)
+      .eq("user_id", profile.id)
+      .maybeSingle();
+    row = fallback.data as unknown as ProviderRow | null;
+  }
   if (!row) return null;
+  // A model override must come from the saved catalog (or be the default).
+  if (modelOverride && modelOverride !== row.model) {
+    const catalog = Array.isArray(row.models) ? row.models : [];
+    if (!catalog.includes(modelOverride)) return null;
+  }
   try {
     return {
       id: row.id,

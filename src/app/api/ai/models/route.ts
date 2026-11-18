@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { checkRate, rateLimited } from "@/lib/rate-limit";
 import { decryptSecret, } from "@/lib/crypto";
 import { opencodeSessionHeaders } from "@/lib/ai/provider";
-import { isSafePublicUrl } from "@/lib/ai/recipes";
+import { isSafePublicUrl } from "@/lib/security";
 
 const bodySchema = z.object({
   base_url: z

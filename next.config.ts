@@ -18,6 +18,15 @@ const csp = [
 ].join("; ");
 
 const securityHeaders = [
+  // HSTS only makes sense over TLS; Vercel terminates TLS for deployments.
+  ...(isDev
+    ? []
+    : [
+        {
+          key: "Strict-Transport-Security",
+          value: "max-age=63072000; includeSubDomains",
+        },
+      ]),
   { key: "Content-Security-Policy", value: csp },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isSafePublicUrl } from "@/lib/security";
 
 /** Schemas + prompts shared by the AI features (reel extraction, estimation). */
 
@@ -77,20 +78,10 @@ export function estimateMessages(input: {
 
 /**
  * Fetches og/meta metadata from a share URL; returns null when blocked
- * (Instagram frequently does). SSRF guard: https-only and hostnames that
- * can never resolve inside the server's own network.
+ * (Instagram frequently does). SSRF guard lives in `@/lib/security` and is
+ * shared with the AI provider path.
  */
-const BLOCKED_HOSTS = /^(localhost$|127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[::1\]$|.*\.local$|.*\.internal$)/i;
-
-export function isSafePublicUrl(raw: string): boolean {
-  try {
-    const u = new URL(raw);
-    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
-    return !BLOCKED_HOSTS.test(u.hostname);
-  } catch {
-    return false;
-  }
-}
+export { isSafePublicUrl } from "@/lib/security";
 
 export async function fetchPageMeta(
   url: string,
