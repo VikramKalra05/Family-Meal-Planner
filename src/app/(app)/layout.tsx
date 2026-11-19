@@ -1,8 +1,9 @@
 import { Suspense } from "react";
-import { getProfile } from "@/lib/profile";
+import { getProfile, getWeighInStatus } from "@/lib/profile";
 import { AppNav } from "@/components/app-nav";
 import { SubmitButton } from "@/components/submit-button";
 import { AssistantLauncher } from "@/components/assistant-launcher";
+import { WeighInNudge } from "@/components/weigh-in-nudge";
 import { signOut } from "@/app/auth/actions";
 
 /**
@@ -22,6 +23,9 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
               <ProfileHeading />
             </Suspense>
           </div>
+          <Suspense fallback={null}>
+            <WeighInHeaderSlot />
+          </Suspense>
           <AssistantLauncher />
           <form action={signOut}>
             <SubmitButton
@@ -44,9 +48,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
 
 async function ProfileHeading() {
   const profile = await getProfile();
-  if (!profile) return <ProfileHeadingSkeleton />;
-
-  return (
+  if (!profile) return <ProfileHeadingSkeleton />;  return (
     <div className="min-w-0">
       <p className="truncate text-sm font-medium">{profile.display_name}</p>
       <p className="text-xs text-neutral-500">
@@ -57,6 +59,22 @@ async function ProfileHeading() {
             : "Family member"}
       </p>
     </div>
+  );
+}
+
+/**
+ * Header nudge: streams in behind Suspense so a Supabase read never delays
+ * navigation. Renders nothing once today's weigh-in exists.
+ */
+async function WeighInHeaderSlot() {
+  const status = await getWeighInStatus();
+  if (!status) return null;
+  return (
+    <WeighInNudge
+      loggedToday={status.loggedToday}
+      weighInTime={status.weighInTime}
+      today={status.today}
+    />
   );
 }
 

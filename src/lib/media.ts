@@ -38,6 +38,27 @@ export function parseMediaUrl(rawUrl: string): ParsedMedia {
   }
 }
 
+export interface RecipeSearchLinks {
+  youtube: string;
+  instagram: string;
+}
+
+/**
+ * Outbound "how do I make this?" searches for a dish.
+ *
+ * Instagram's keyword page is a universal link: on a phone with the app
+ * installed the OS opens Instagram itself. Logged-out desktop visitors hit
+ * Instagram's login wall — accepted, since the app is used signed-in.
+ */
+export function recipeSearchLinks(title: string): RecipeSearchLinks {
+  const dish = title.trim().replace(/\s+/g, " ");
+  const query = encodeURIComponent(`${dish} recipe`);
+  return {
+    youtube: `https://www.youtube.com/results?search_query=${query}`,
+    instagram: `https://www.instagram.com/explore/search/keyword/?q=${query}`,
+  };
+}
+
 /** deterministic placeholder art per dish — flat clashing pastels (no gradients). */
 const CUISINE_COLORS: Record<string, string> = {
   "north-indian": "bg-orange-200",

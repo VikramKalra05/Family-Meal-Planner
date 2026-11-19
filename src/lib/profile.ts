@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { istDateISO } from "@/lib/date";
 import type { Profile } from "@/lib/db-types";
 
 /**
@@ -24,6 +25,28 @@ export const getProfile = cache(async (): Promise<Profile | null> => {
 
   const { data } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
   return (data as Profile | null) ?? null;
+});
+
+/**
+ * Request-scoped weigh-in status for the header nudge. Cached so the layout
+ * and any page in the same request don't duplicate the query.
+ */
+export const getWeighInStatus = cache(async () => {
+  const profile = await getProfile();
+  if (!profile) return null;
+  const supabase = await createClient();
+  const today = istDateISO();
+  const { data } = await supabase
+    .from("weight_logs")
+    .select("id")
+    .eq("member_id", profile.id)
+    .eq("logged_on", today)
+    .maybeSingle();
+  return {
+    today,
+    loggedToday: !!data,
+    weighInTime: profile.weigh_in_time,
+  };
 });
 
 /**

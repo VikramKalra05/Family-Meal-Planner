@@ -6,7 +6,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { PortionCalculator, type CalcIngredient, type CalcMember } from "./portion-calculator";
 import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
-import { dishEmoji, parseMediaUrl, placeholderGradient } from "@/lib/media";
+import { dishEmoji, parseMediaUrl, placeholderGradient, recipeSearchLinks } from "@/lib/media";
 import { healthTags } from "@/lib/nutrition/health";
 import { servingSize } from "@/lib/nutrition/serving";
 import type { Ingredient, Profile, Recipe, RecipeNutrition } from "@/lib/db-types";
@@ -87,6 +87,7 @@ export default async function RecipeDetailPage({
   const videos = media.filter((m) => m.kind === "video");
   const extraImages = media.filter((m) => m.kind === "image");
   const isOwner = r.owner_id === profile.id;
+  const searchLinks = recipeSearchLinks(r.title);
 
   const hero = r.image_url ?? extraImages[0]?.url ?? null;
   const tags = r.recipe_nutrition
@@ -133,6 +134,28 @@ export default async function RecipeDetailPage({
           {r.cuisine ? ` · ${r.cuisine.replace("-", " ")}` : ""}
           {` · nutrition ${r.recipe_nutrition?.method ?? "n/a"}`}
         </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-extrabold uppercase tracking-widest text-neutral-400">Find this dish</span>
+        <a
+          href={searchLinks.youtube}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`Search “${r.title}” recipes on YouTube`}
+          className="flex items-center gap-1.5 rounded-none border-2 border-neutral-900 bg-white px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:bg-red-100 hover:shadow-none"
+        >
+          <span aria-hidden>▶</span> YouTube
+        </a>
+        <a
+          href={searchLinks.instagram}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`Search “${r.title}” recipes on Instagram`}
+          className="flex items-center gap-1.5 rounded-none border-2 border-neutral-900 bg-white px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:bg-pink-100 hover:shadow-none"
+        >
+          <span aria-hidden>◎</span> Instagram
+        </a>
       </div>
 
       {isOwner && (
