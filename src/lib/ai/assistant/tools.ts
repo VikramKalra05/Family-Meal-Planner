@@ -1,4 +1,3 @@
-import { z } from "zod";
 import type { ActivityLevel, Goal, Profile } from "@/lib/db-types";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -22,6 +21,7 @@ import { weightTrend, progressPct, projectTargetDate } from "@/lib/weight";
 import { istDateISO, istHour } from "@/lib/date";
 import { memberLabels } from "./labels";
 import { chatJson, ProviderError, type ResolvedProvider } from "@/lib/ai/provider";
+import { MEAL_PARSE_SYSTEM, intakeDescription, mealParseSchema, type MealParseItem } from "@/lib/ai/meal-parse";
 import { importDraftRecipe } from "@/app/(app)/recipes/from-reel/actions";
 import type { AssistantAction } from "./schema";
 
@@ -552,26 +552,6 @@ function slotForNow(): "breakfast" | "lunch" | "snack" | "dinner" {
   return hour < 11 ? "breakfast" : hour < 16 ? "lunch" : hour < 19 ? "snack" : "dinner";
 }
 
-const mealParseSchema = z.object({
-  items: z
-    .array(
-      z.object({
-        name: z.string().min(1).max(80),
-        kcal: z.coerce.number().min(0).max(3000),
-        proteinG: z.coerce.number().min(0).max(300),
-        carbsG: z.coerce.number().min(0).max(500),
-        fatG: z.coerce.number().min(0).max(300),
-        fiberG: z.coerce.number().min(0).max(200).optional(),
-      }),
-    )
-    .min(1)
-    .max(15),
-});
-
-const MEAL_PARSE_SYSTEM = `You extract everything a person ATE from a short message (Hinglish, English, or food names with counts).
-Respond with ONLY JSON: {"items": [{"name": string, "kcal": number, "proteinG": number, "carbsG": number, "fatG": number, "fiberG": number}]}.
-Estimate nutrition for typical Indian home portions. One entry per distinct food item, name kept short.`;
-
 type ServerClient = Awaited<ReturnType<typeof createClient>>;
 
 /**
@@ -615,7 +595,7 @@ export async function executeMutationAction(
   switch (action.action) {
     case "log_meal": {
       if (!provider) return { ok: false, message: "No AI provider configured — add one in Settings → AI Providers first." };
-      let items: z.infer<typeof mealParseSchema>["items"];
+      let items: MealParseItem[];
       try {
         const parsed = await chatJson(
           provider,
@@ -642,7 +622,7 @@ export async function executeMutationAction(
           member_id: profile.id,
           logged_on: istDateISO(),
           slot,
-          description: i.name,
+          description: intakeDescription(i),
           kcal: i.kcal,
           protein_g: i.proteinG,
           carbs_g: i.carbsG,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatIntakeName,
   groupBySlot,
   macroContributions,
   pctOf,
@@ -73,6 +74,19 @@ describe("totals", () => {
 
   it("returns zeroes for an empty day", () => {
     expect(totals([])).toEqual({ kcal: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 });
+  });
+});
+
+describe("formatIntakeName", () => {
+  it("keeps the eaten count visible in the label", () => {
+    expect(formatIntakeName("Banana", "2 pieces")).toBe("Banana (2 pieces)");
+    expect(formatIntakeName("  Poha ", " 1 plate ")).toBe("Poha (1 plate)");
+  });
+
+  it("leaves the name alone when no quantity was parsed", () => {
+    expect(formatIntakeName("Chicken burger x2")).toBe("Chicken burger x2");
+    expect(formatIntakeName("Milk", "")).toBe("Milk");
+    expect(formatIntakeName("Milk", null)).toBe("Milk");
   });
 });
 

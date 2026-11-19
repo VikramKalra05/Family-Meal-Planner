@@ -77,6 +77,16 @@ export function toIntakeItem(row: IntakeRow): IntakeItem {
   };
 }
 
+/**
+ * Keeps the eaten count visible in the diary: "Banana" + "2 pieces" →
+ * "Banana (2 pieces)". Without this a 2-banana entry reads as one banana.
+ */
+export function formatIntakeName(name: string, quantity?: string | null): string {
+  const base = name.trim();
+  const qty = quantity?.trim();
+  return qty ? `${base} (${qty})` : base;
+}
+
 export function totals(items: IntakeItem[]): MacroTotals {
   return items.reduce<MacroTotals>(
     (acc, item) => ({

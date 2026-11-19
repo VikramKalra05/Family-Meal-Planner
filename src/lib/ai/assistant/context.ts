@@ -54,7 +54,7 @@ export async function buildContextSnapshot(profile: Profile): Promise<Record<str
       .maybeSingle(),
     supabase
       .from("intake_logs")
-      .select("kcal, protein_g, slot, description")
+      .select("kcal, protein_g, carbs_g, fat_g, fiber_g, slot, description")
       .eq("member_id", profile.id)
       .eq("logged_on", today),
     supabase
@@ -111,6 +111,9 @@ export async function buildContextSnapshot(profile: Profile): Promise<Record<str
 
   const consumedKcal = (intakeRes.data ?? []).reduce((s, l) => s + Number(l.kcal), 0);
   const consumedProtein = (intakeRes.data ?? []).reduce((s, l) => s + Number(l.protein_g ?? 0), 0);
+  const consumedCarbs = (intakeRes.data ?? []).reduce((s, l) => s + Number(l.carbs_g ?? 0), 0);
+  const consumedFat = (intakeRes.data ?? []).reduce((s, l) => s + Number(l.fat_g ?? 0), 0);
+  const consumedFiber = (intakeRes.data ?? []).reduce((s, l) => s + Number(l.fiber_g ?? 0), 0);
 
   const weights = (weightRes.data ?? []).map((w) => ({
     date: w.logged_on,
@@ -145,7 +148,18 @@ export async function buildContextSnapshot(profile: Profile): Promise<Record<str
     eaten_today: {
       kcal: Math.round(consumedKcal),
       protein_g: Math.round(consumedProtein),
-      items: (intakeRes.data ?? []).map((l) => l.description),
+      carbs_g: Math.round(consumedCarbs),
+      fat_g: Math.round(consumedFat),
+      fiber_g: Math.round(consumedFiber),
+      items: (intakeRes.data ?? []).map((l) => ({
+        what: l.description,
+        slot: l.slot,
+        kcal: Math.round(Number(l.kcal)),
+        protein_g: Math.round(Number(l.protein_g ?? 0)),
+        carbs_g: Math.round(Number(l.carbs_g ?? 0)),
+        fat_g: Math.round(Number(l.fat_g ?? 0)),
+        fiber_g: Math.round(Number(l.fiber_g ?? 0)),
+      })),
     },
     pantry_sample: (pantryRes.data ?? []).map((p) => `${p.name} (${Number(p.quantity)} ${p.unit})`),
     weight: {
