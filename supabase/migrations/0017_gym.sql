@@ -11,7 +11,7 @@
 --  * Client-generated ids make the offline queue idempotent.
 
 -- ── Gym profile ─────────────────────────────────────────────────────────────
-create table gyms (
+create table if not exists gyms (
   id              uuid primary key default gen_random_uuid(),
   member_id       uuid not null references profiles(id) on delete cascade,
   name            text not null default 'My gym',
@@ -28,7 +28,7 @@ create table gyms (
 );
 
 -- ── Custom exercises (seed library is code) ─────────────────────────────────
-create table custom_exercises (
+create table if not exists custom_exercises (
   id                 uuid primary key default gen_random_uuid(),
   member_id          uuid not null references profiles(id) on delete cascade,
   name               text not null,
@@ -43,10 +43,10 @@ create table custom_exercises (
   media              jsonb not null default '[]',
   created_at         timestamptz not null default now()
 );
-create index custom_exercises_member on custom_exercises (member_id);
+create index if not exists custom_exercises_member on custom_exercises (member_id);
 
 -- ── Programs ────────────────────────────────────────────────────────────────
-create table programs (
+create table if not exists programs (
   id           uuid primary key default gen_random_uuid(),
   member_id    uuid not null references profiles(id) on delete cascade,
   name         text not null,
@@ -56,9 +56,9 @@ create table programs (
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
 );
-create unique index programs_one_active on programs (member_id) where is_active;
+create unique index if not exists programs_one_active on programs (member_id) where is_active;
 
-create table program_days (
+create table if not exists program_days (
   id          uuid primary key default gen_random_uuid(),
   program_id  uuid not null references programs(id) on delete cascade,
   day_index   smallint not null check (day_index between 0 and 6),
@@ -67,7 +67,7 @@ create table program_days (
   unique (program_id, day_index)
 );
 
-create table program_exercises (
+create table if not exists program_exercises (
   id            uuid primary key default gen_random_uuid(),
   program_day_id uuid not null references program_days(id) on delete cascade,
   exercise_key  text not null,
@@ -79,10 +79,10 @@ create table program_exercises (
   increment_kg  numeric(5, 2) not null default 2.5,
   notes         text
 );
-create index program_exercises_day on program_exercises (program_day_id, position);
+create index if not exists program_exercises_day on program_exercises (program_day_id, position);
 
 -- ── Sessions + set logs ─────────────────────────────────────────────────────
-create table workout_sessions (
+create table if not exists workout_sessions (
   id                uuid primary key default gen_random_uuid(),
   member_id         uuid not null references profiles(id) on delete cascade,
   program_day_id    uuid references program_days(id) on delete set null,
@@ -95,9 +95,9 @@ create table workout_sessions (
   client_updated_at timestamptz not null default now(),
   created_at        timestamptz not null default now()
 );
-create index workout_sessions_member_date on workout_sessions (member_id, session_date desc);
+create index if not exists workout_sessions_member_date on workout_sessions (member_id, session_date desc);
 
-create table set_logs (
+create table if not exists set_logs (
   id                uuid primary key default gen_random_uuid(),
   session_id        uuid not null references workout_sessions(id) on delete cascade,
   member_id         uuid not null references profiles(id) on delete cascade,
@@ -117,12 +117,12 @@ create table set_logs (
   created_at        timestamptz not null default now(),
   deleted_at        timestamptz
 );
-create index set_logs_session on set_logs (session_id, exercise_key, set_index);
-create index set_logs_member on set_logs (member_id, created_at desc);
-create index set_logs_exercise on set_logs (member_id, exercise_key, created_at desc);
+create index if not exists set_logs_session on set_logs (session_id, exercise_key, set_index);
+create index if not exists set_logs_member on set_logs (member_id, created_at desc);
+create index if not exists set_logs_exercise on set_logs (member_id, exercise_key, created_at desc);
 
 -- ── Body measurements + photos ──────────────────────────────────────────────
-create table body_measurements (
+create table if not exists body_measurements (
   id          uuid primary key default gen_random_uuid(),
   member_id   uuid not null references profiles(id) on delete cascade,
   measured_on date not null,
@@ -137,7 +137,7 @@ create table body_measurements (
   unique (member_id, measured_on)
 );
 
-create table progress_photos (
+create table if not exists progress_photos (
   id           uuid primary key default gen_random_uuid(),
   member_id    uuid not null references profiles(id) on delete cascade,
   taken_on     date not null,
@@ -146,7 +146,7 @@ create table progress_photos (
   note         text,
   created_at   timestamptz not null default now()
 );
-create index progress_photos_member on progress_photos (member_id, taken_on desc);
+create index if not exists progress_photos_member on progress_photos (member_id, taken_on desc);
 
 -- Private bucket. Path convention: <member_id>/<uuid>.jpg
 insert into storage.buckets (id, name, public)
@@ -154,7 +154,7 @@ values ('progress-photos', 'progress-photos', false)
 on conflict (id) do nothing;
 
 -- ── Adaptations + streak freezes ────────────────────────────────────────────
-create table adaptive_adjustments (
+create table if not exists adaptive_adjustments (
   id           uuid primary key default gen_random_uuid(),
   member_id    uuid not null references profiles(id) on delete cascade,
   effective_on date not null,
@@ -164,9 +164,9 @@ create table adaptive_adjustments (
   signals      jsonb not null default '{}',
   applied_at   timestamptz not null default now()
 );
-create index adaptive_adjustments_member on adaptive_adjustments (member_id, effective_on desc);
+create index if not exists adaptive_adjustments_member on adaptive_adjustments (member_id, effective_on desc);
 
-create table streak_freezes (
+create table if not exists streak_freezes (
   id         uuid primary key default gen_random_uuid(),
   member_id  uuid not null references profiles(id) on delete cascade,
   used_on    date not null,
@@ -190,20 +190,25 @@ alter table progress_photos enable row level security;
 alter table adaptive_adjustments enable row level security;
 alter table streak_freezes enable row level security;
 
+drop policy if exists "own gym" on gyms;
 create policy "own gym" on gyms
   for all to authenticated using (member_id = auth.uid()) with check (member_id = auth.uid());
 
+drop policy if exists "own custom exercises" on custom_exercises;
 create policy "own custom exercises" on custom_exercises
   for all to authenticated using (member_id = auth.uid()) with check (member_id = auth.uid());
 
+drop policy if exists "own programs" on programs;
 create policy "own programs" on programs
   for all to authenticated using (member_id = auth.uid()) with check (member_id = auth.uid());
 
+drop policy if exists "own program days" on program_days;
 create policy "own program days" on program_days
   for all to authenticated
   using (exists (select 1 from programs p where p.id = program_days.program_id and p.member_id = auth.uid()))
   with check (exists (select 1 from programs p where p.id = program_days.program_id and p.member_id = auth.uid()));
 
+drop policy if exists "own program exercises" on program_exercises;
 create policy "own program exercises" on program_exercises
   for all to authenticated
   using (
@@ -221,9 +226,11 @@ create policy "own program exercises" on program_exercises
     )
   );
 
+drop policy if exists "own sessions" on workout_sessions;
 create policy "own sessions" on workout_sessions
   for all to authenticated using (member_id = auth.uid()) with check (member_id = auth.uid());
 
+drop policy if exists "own set logs" on set_logs;
 create policy "own set logs" on set_logs
   for all to authenticated
   using (
@@ -241,15 +248,19 @@ create policy "own set logs" on set_logs
     )
   );
 
+drop policy if exists "own measurements" on body_measurements;
 create policy "own measurements" on body_measurements
   for all to authenticated using (member_id = auth.uid()) with check (member_id = auth.uid());
 
+drop policy if exists "own progress photos" on progress_photos;
 create policy "own progress photos" on progress_photos
   for all to authenticated using (member_id = auth.uid()) with check (member_id = auth.uid());
 
+drop policy if exists "own adaptations" on adaptive_adjustments;
 create policy "own adaptations" on adaptive_adjustments
   for all to authenticated using (member_id = auth.uid()) with check (member_id = auth.uid());
 
+drop policy if exists "own freezes" on streak_freezes;
 create policy "own freezes" on streak_freezes
   for all to authenticated using (member_id = auth.uid()) with check (member_id = auth.uid());
 
