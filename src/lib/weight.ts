@@ -57,6 +57,94 @@ export function projectTargetDate(
   return { eta: eta.toISOString().slice(0, 10), weeks };
 }
 
+// ── Chart helpers ───────────────────────────────────────────────────────────
+
+export type WeightRange = "7d" | "30d" | "90d" | "all";
+
+export const WEIGHT_RANGES: { key: WeightRange; label: string; days: number | null }[] = [
+  { key: "7d", label: "7D", days: 7 },
+  { key: "30d", label: "30D", days: 30 },
+  { key: "90d", label: "90D", days: 90 },
+  { key: "all", label: "All", days: null },
+];
+
+/** Keeps points inside the trailing window ending on `todayISO` (inclusive). */
+export function filterWeightRange(
+  points: WeightPoint[],
+  range: WeightRange,
+  todayISO: string,
+): WeightPoint[] {
+  const days = WEIGHT_RANGES.find((r) => r.key === range)?.days ?? null;
+  if (days == null) return points;
+  const cutoff = Date.parse(todayISO) - (days - 1) * 86400000;
+  return points.filter((p) => Date.parse(p.date) >= cutoff);
+}
+
+/**
+ * Calendar trailing average (default 7 days), not a per-index window — so
+ * missed weigh-ins don't shift the smoothing. Input must be ascending.
+ */
+export function movingAverage(points: WeightPoint[], windowDays = 7): WeightPoint[] {
+  return points.map((point) => {
+    const end = Date.parse(point.date);
+    const start = end - (windowDays - 1) * 86400000;
+    let sum = 0;
+    let count = 0;
+    for (const other of points) {
+      const t = Date.parse(other.date);
+      if (t < start) continue;
+      if (t > end) break;
+      sum += other.kg;
+      count += 1;
+    }
+    return {
+      date: point.date,
+      kg: count > 0 ? Math.round((sum / count) * 100) / 100 : point.kg,
+    };
+  });
+}
+
+export interface WeightStats {
+  /** Change from the first to the last visible log (kg). */
+  delta: number;
+  /** Change over the last 7 calendar days, null with a single point. */
+  last7Delta: number | null;
+  min: number;
+  max: number;
+}
+
+export function weightStats(points: WeightPoint[]): WeightStats | null {
+  if (points.length === 0) return null;
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  const first = points[0];
+  const last = points[points.length - 1];
+  const cutoff = Date.parse(last.date) - 7 * 86400000;
+  const weekAgo = [...points].reverse().find((p) => Date.parse(p.date) <= cutoff) ?? first;
+  const values = points.map((p) => p.kg);
+  return {
+    delta: round1(last.kg - first.kg),
+    last7Delta: points.length > 1 ? round1(last.kg - weekAgo.kg) : null,
+    min: Math.min(...values),
+    max: Math.max(...values),
+  };
+}
+
+/** Human-friendly axis ticks (1/2/5 × 10^n steps). */
+export function niceTicks(min: number, max: number, count = 5): number[] {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return [min];
+  const raw = (max - min) / Math.max(1, count - 1);
+  const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
+  const normalized = raw / magnitude;
+  const step =
+    (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) * magnitude;
+  const start = Math.ceil(min / step - 1e-9) * step;
+  const ticks: number[] = [];
+  for (let value = start; value <= max + step * 1e-6; value += step) {
+    ticks.push(Math.round(value * 100) / 100);
+  }
+  return ticks;
+}
+
 function daysBetween(a: string, b: string): number {
   return Math.max(1, Math.round((Date.parse(b) - Date.parse(a)) / (24 * 3600 * 1000)));
 }

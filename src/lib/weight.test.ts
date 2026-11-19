@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { progressPct, projectTargetDate, weightTrend, type WeightPoint } from "@/lib/weight";
+import {
+  filterWeightRange,
+  movingAverage,
+  niceTicks,
+  progressPct,
+  projectTargetDate,
+  weightStats,
+  weightTrend,
+  type WeightPoint,
+} from "@/lib/weight";
 
 const d = (offset: number) => {
   const date = new Date(Date.parse("2026-10-01") + offset * 24 * 3600 * 1000);
@@ -100,5 +109,76 @@ describe("projectTargetDate", () => {
 
   it("returns null when target already reached", () => {
     expect(projectTargetDate([{ date: d(0), kg: 68 }], 68, -0.5)).toBeNull();
+  });
+});
+
+describe("filterWeightRange", () => {
+  const points: WeightPoint[] = [
+    { date: d(0), kg: 72 },
+    { date: d(10), kg: 71 },
+    { date: d(40), kg: 70 },
+    { date: d(100), kg: 69 },
+  ];
+
+  it("keeps only the trailing window (inclusive of today)", () => {
+    expect(filterWeightRange(points, "30d", d(100))).toEqual([{ date: d(100), kg: 69 }]);
+    expect(filterWeightRange(points, "90d", d(100))).toEqual([{ date: d(40), kg: 70 }, { date: d(100), kg: 69 }]);
+  });
+
+  it("returns everything for All", () => {
+    expect(filterWeightRange(points, "all", d(100))).toHaveLength(4);
+  });
+});
+
+describe("movingAverage", () => {
+  it("averages by calendar window, not by point index", () => {
+    const points: WeightPoint[] = [
+      { date: d(0), kg: 70 },
+      { date: d(1), kg: 71 },
+      { date: d(20), kg: 72 }, // far gap: this window holds only itself
+    ];
+    const avg = movingAverage(points, 7);
+    expect(avg[0].kg).toBe(70);
+    expect(avg[1].kg).toBe(70.5);
+    expect(avg[2].kg).toBe(72);
+  });
+
+  it("keeps every input date", () => {
+    const points: WeightPoint[] = [
+      { date: d(0), kg: 70 },
+      { date: d(3), kg: 69 },
+    ];
+    expect(movingAverage(points).map((p) => p.date)).toEqual(points.map((p) => p.date));
+  });
+});
+
+describe("weightStats", () => {
+  it("computes the range delta, 7-day delta and min/max", () => {
+    const points: WeightPoint[] = Array.from({ length: 11 }, (_, i) => ({
+      date: d(i * 3),
+      kg: 72 - i * 0.2,
+    }));
+    const stats = weightStats(points);
+    expect(stats).not.toBeNull();
+    expect(stats!.delta).toBe(-2);
+    expect(stats!.min).toBe(70);
+    expect(stats!.max).toBe(72);
+    expect(stats!.last7Delta).toBeLessThan(0);
+  });
+
+  it("returns null for an empty range", () => {
+    expect(weightStats([])).toBeNull();
+  });
+});
+
+describe("niceTicks", () => {
+  it("produces clean ascending ticks inside the domain", () => {
+    const ticks = niceTicks(68.2, 72.1, 5);
+    expect(ticks).toEqual([69, 70, 71, 72]);
+  });
+
+  it("handles a flat or invalid domain", () => {
+    expect(niceTicks(70, 70)).toEqual([70]);
+    expect(niceTicks(Number.NaN, 3)).toEqual([Number.NaN]);
   });
 });
