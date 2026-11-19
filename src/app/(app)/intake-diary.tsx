@@ -294,7 +294,7 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
           ))}
         </div>
       ) : (
-        <div className="grid gap-3 bg-white p-4 lg:grid-cols-2">
+        <div className="grid gap-3 bg-white p-4 lg:grid-cols-2 2xl:grid-cols-4">
           <p className="col-span-full text-[11px] font-semibold text-neutral-500">
             Where each macro came from — the small bar is that food&apos;s share of the macro you&apos;ve logged.
           </p>

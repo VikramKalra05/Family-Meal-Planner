@@ -19,7 +19,7 @@ export default async function ProgramPage() {
   const trainingDays = [...(gym?.training_days ?? [])].sort((a, b) => a - b);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5">
+    <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <Link href="/gym" className="text-xs font-extrabold uppercase tracking-wide text-neutral-400 hover:text-neutral-900">

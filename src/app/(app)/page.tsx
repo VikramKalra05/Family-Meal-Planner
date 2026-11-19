@@ -98,7 +98,7 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
   });
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="w-full space-y-6">
       <WeighInReminder weighInTime={profile.weigh_in_time} />
       <section className="rounded-none border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0_#111]">
         <h1 className="text-lg font-extrabold uppercase tracking-tight">
