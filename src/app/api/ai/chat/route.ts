@@ -85,6 +85,8 @@ const askSchema = z.object({
   conversation_id: z.string().uuid().nullable().optional(),
   /** Model override (a model from the picked provider's saved catalog). */
   model: z.string().trim().min(1).max(120).optional(),
+  /** App path the assistant panel is currently open on. */
+  page: z.string().trim().max(200).optional(),
 });
 
 /** One assistant turn. */
@@ -125,6 +127,7 @@ export async function POST(req: Request) {
       provider,
       req.signal,
       body.data.conversation_id ?? null,
+      body.data.page,
     );
     return NextResponse.json(result);
   } catch (e) {

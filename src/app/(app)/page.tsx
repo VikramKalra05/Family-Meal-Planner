@@ -8,6 +8,8 @@ import { mondayOf } from "@/lib/planner";
 import { formatIstDate, istDateISO } from "@/lib/date";
 import { WeighInReminder } from "@/components/weigh-in-reminder";
 import { SubmitButton } from "@/components/submit-button";
+import { IntakeDiary } from "./intake-diary";
+import { toIntakeItem } from "@/lib/intake";
 
 export const instant = false;
 
@@ -19,19 +21,35 @@ const SLOT_LABEL: Record<string, string> = {
 };
 const SLOT_ORDER = ["breakfast", "lunch", "snack", "dinner"];
 
-export default async function TodayPage() {
+export default async function TodayPage({ searchParams }: PageProps<"/">) {
   const profile = await requireFullProfile();
   const supabase = await createClient();
   const today = istDateISO();
+
+  // The diary can look back at past days (?d=YYYY-MM-DD) — never into the future.
+  const { d } = await searchParams;
+  const diaryDay =
+    typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && d <= today ? d : today;
 
   const [householdRes, todayLogRes, latestLogRes, logsRes] = await Promise.all([
     supabase.from("households").select("*").eq("id", profile.household_id!).single(),
     supabase.from("weight_logs").select("weight_kg").eq("member_id", profile.id).eq("logged_on", today).maybeSingle(),
     supabase.from("weight_logs").select("weight_kg, logged_on").order("logged_on", { ascending: false }).limit(1).maybeSingle(),
-    supabase.from("intake_logs").select("slot, kcal, protein_g, description, source").eq("member_id", profile.id).eq("logged_on", today),
+    supabase
+      .from("intake_logs")
+      .select("id, logged_on, slot, description, kcal, protein_g, carbs_g, fat_g, fiber_g, source, created_at")
+      .eq("member_id", profile.id)
+      .eq("logged_on", diaryDay)
+      .order("created_at", { ascending: true }),
   ]);
   const household = householdRes.data;
   const weighIn = { loggedToday: !!todayLogRes.data, latestKg: latestLogRes.data ? Number(latestLogRes.data.weight_kg) : null };
+  const intake = (logsRes.data ?? []).map((row) =>
+    toIntakeItem({
+      ...row,
+      slot: row.slot as string | null,
+    }),
+  );
 
   const targets = profile.targets_cache?.targets;
 
@@ -71,10 +89,6 @@ export default async function TodayPage() {
       kcal: kcalRow ? Math.round(Number(kcalRow.kcal) * portion) : null,
     };
   });
-
-  const consumed = (logsRes.data ?? []).reduce((s, l) => s + Number(l.kcal), 0);
-  const consumedProtein = (logsRes.data ?? []).reduce((s, l) => s + Number(l.protein_g), 0);
-  const pct = targets ? Math.min(100, Math.round((consumed / targets.kcal) * 100)) : 0;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -137,18 +151,9 @@ export default async function TodayPage() {
         ) : (
           <p className="text-sm text-neutral-500">Complete your profile to calculate targets.</p>
         )}
-        {targets && (
-          <div className="mt-5 border-t-2 border-neutral-900 pt-4">
-            <div className="flex items-center justify-between text-xs font-bold">
-              <span className="uppercase tracking-wide text-neutral-500">Eaten today: {Math.round(consumed)} kcal ({consumedProtein}g protein)</span>
-              <span className="text-neutral-500">{pct}%</span>
-            </div>
-            <div className="mt-1.5 h-4 w-full border-2 border-neutral-900 bg-white">
-              <div className="h-full bg-lime-400" style={{ width: `${pct}%` }} />
-            </div>
-          </div>
-        )}
       </section>
+
+      <IntakeDiary key={diaryDay} date={diaryDay} today={today} items={intake} targets={targets ?? null} />
 
       <section className="space-y-3">
         <div className="flex items-center justify-between">
