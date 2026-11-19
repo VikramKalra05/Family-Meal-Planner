@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Profile } from "@/lib/db-types";
+import type { ActivityLevel, Goal, Profile } from "@/lib/db-types";
 import { createClient } from "@/lib/supabase/server";
 import {
   aggregateIngredients,
@@ -123,7 +123,7 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
           .maybeSingle(),
         supabase
           .from("intake_logs")
-          .select("slot, description, kcal, protein_g, carbs_g, fat_g")
+          .select("id, logged_on, slot, description, kcal, protein_g, carbs_g, fat_g, fiber_g, source")
           .eq("member_id", profile.id)
           .eq("logged_on", today),
       ]);
@@ -162,9 +162,63 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
           eaten_today: {
             kcal: Math.round(eaten),
             protein_g: Math.round(intake.reduce((s, l) => s + Number(l.protein_g ?? 0), 0)),
+            carbs_g: Math.round(intake.reduce((s, l) => s + Number(l.carbs_g ?? 0), 0)),
+            fat_g: Math.round(intake.reduce((s, l) => s + Number(l.fat_g ?? 0), 0)),
+            fiber_g: Math.round(intake.reduce((s, l) => s + Number(l.fiber_g ?? 0), 0)),
             remaining_kcal: targets ? Math.round(targets.kcal - eaten) : null,
-            items: intake.map((l) => ({ slot: l.slot, what: l.description, kcal: Math.round(Number(l.kcal)) })),
+            items: intake.map((l) => ({
+              item_id: l.id,
+              slot: l.slot,
+              what: l.description,
+              kcal: Math.round(Number(l.kcal)),
+              protein_g: Math.round(Number(l.protein_g ?? 0)),
+              carbs_g: Math.round(Number(l.carbs_g ?? 0)),
+              fat_g: Math.round(Number(l.fat_g ?? 0)),
+              fiber_g: l.fiber_g == null ? null : Math.round(Number(l.fiber_g)),
+              source: l.source,
+            })),
           },
+        },
+      };
+    }
+
+    case "query_intake_day": {
+      const date = action.date ?? istDateISO();
+      const { data } = await supabase
+        .from("intake_logs")
+        .select("id, logged_on, slot, description, kcal, protein_g, carbs_g, fat_g, fiber_g, source")
+        .eq("member_id", profile.id)
+        .eq("logged_on", date)
+        .order("created_at");
+      const items = (data ?? []).map((l) => ({
+        item_id: l.id,
+        slot: l.slot,
+        what: l.description,
+        kcal: Math.round(Number(l.kcal)),
+        protein_g: Math.round(Number(l.protein_g ?? 0)),
+        carbs_g: Math.round(Number(l.carbs_g ?? 0)),
+        fat_g: Math.round(Number(l.fat_g ?? 0)),
+        fiber_g: l.fiber_g == null ? null : Math.round(Number(l.fiber_g)),
+        source: l.source,
+      }));
+      const targets = profile.targets_cache?.targets ?? null;
+      const sum = (key: "kcal" | "protein_g" | "carbs_g" | "fat_g" | "fiber_g") =>
+        Math.round(items.reduce((s, i) => s + Number(i[key] ?? 0), 0));
+      return {
+        ok: true,
+        message: `Checked intake for ${date}`,
+        data: {
+          date,
+          totals: {
+            kcal: sum("kcal"),
+            protein_g: sum("protein_g"),
+            carbs_g: sum("carbs_g"),
+            fat_g: sum("fat_g"),
+            fiber_g: sum("fiber_g"),
+          },
+          targets,
+          remaining_kcal: targets ? Math.round(targets.kcal - sum("kcal")) : null,
+          items,
         },
       };
     }
@@ -174,16 +228,19 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
       const since = new Date(Date.parse(istDateISO()) - (days - 1) * 86400000).toISOString().slice(0, 10);
       const { data } = await supabase
         .from("intake_logs")
-        .select("logged_on, kcal, protein_g")
+        .select("logged_on, kcal, protein_g, carbs_g, fat_g, fiber_g")
         .eq("member_id", profile.id)
         .gte("logged_on", since)
         .order("logged_on");
       const targets = profile.targets_cache?.targets ?? null;
-      const byDay = new Map<string, { kcal: number; protein: number }>();
+      const byDay = new Map<string, { kcal: number; protein: number; carbs: number; fat: number; fiber: number }>();
       for (const row of data ?? []) {
-        const d = byDay.get(row.logged_on) ?? { kcal: 0, protein: 0 };
+        const d = byDay.get(row.logged_on) ?? { kcal: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 };
         d.kcal += Number(row.kcal);
         d.protein += Number(row.protein_g ?? 0);
+        d.carbs += Number(row.carbs_g ?? 0);
+        d.fat += Number(row.fat_g ?? 0);
+        d.fiber += Number(row.fiber_g ?? 0);
         byDay.set(row.logged_on, d);
       }
       return {
@@ -197,6 +254,9 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
             day,
             kcal: Math.round(v.kcal),
             protein_g: Math.round(v.protein),
+            carbs_g: Math.round(v.carbs),
+            fat_g: Math.round(v.fat),
+            fiber_g: Math.round(v.fiber),
           })),
         },
       };
@@ -450,12 +510,47 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
       };
     }
 
+    case "open_page": {
+      if (action.page === "recipe") {
+        const ref = action.recipe_ref ?? "";
+        const isUuid = /^[0-9a-f-]{36}$/i.test(ref);
+        const q = supabase.from("recipes").select("id, title");
+        const { data: recipe } = await (isUuid ? q.eq("id", ref) : q.ilike("title", `%${ref}%`))
+          .limit(1)
+          .maybeSingle();
+        if (!recipe) return { ok: false, message: `No recipe found for “${ref}”` };
+        return {
+          ok: true,
+          message: `Opened “${recipe.title}”`,
+          data: { path: `/recipes/${recipe.id}`, label: recipe.title },
+        };
+      }
+      const PAGES: Record<string, { path: string; label: string }> = {
+        today: { path: "/", label: "Today" },
+        week: { path: "/week", label: "Week plan" },
+        recipes: { path: "/recipes", label: "Recipes" },
+        pantry: { path: "/pantry", label: "Pantry" },
+        shopping: { path: "/shopping", label: "Shopping list" },
+        progress: { path: "/progress", label: "Progress" },
+        family: { path: "/family", label: "Family" },
+        settings: { path: "/settings", label: "Settings" },
+      };
+      const hit = PAGES[action.page];
+      if (!hit) return { ok: false, message: "That page is not in the app." };
+      return { ok: true, message: `Opened ${hit.label}`, data: { path: hit.path, label: hit.label } };
+    }
+
     default:
       return { ok: false, message: "That read action is not available" };
   }
 }
 
 // ── Mutation executors (always called after explicit user confirmation) ─────
+
+function slotForNow(): "breakfast" | "lunch" | "snack" | "dinner" {
+  const hour = istHour();
+  return hour < 11 ? "breakfast" : hour < 16 ? "lunch" : hour < 19 ? "snack" : "dinner";
+}
 
 const mealParseSchema = z.object({
   items: z
@@ -466,6 +561,7 @@ const mealParseSchema = z.object({
         proteinG: z.coerce.number().min(0).max(300),
         carbsG: z.coerce.number().min(0).max(500),
         fatG: z.coerce.number().min(0).max(300),
+        fiberG: z.coerce.number().min(0).max(200).optional(),
       }),
     )
     .min(1)
@@ -473,8 +569,41 @@ const mealParseSchema = z.object({
 });
 
 const MEAL_PARSE_SYSTEM = `You extract everything a person ATE from a short message (Hinglish, English, or food names with counts).
-Respond with ONLY JSON: {"items": [{"name": string, "kcal": number, "proteinG": number, "carbsG": number, "fatG": number}]}.
+Respond with ONLY JSON: {"items": [{"name": string, "kcal": number, "proteinG": number, "carbsG": number, "fatG": number, "fiberG": number}]}.
 Estimate nutrition for typical Indian home portions. One entry per distinct food item, name kept short.`;
+
+type ServerClient = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * Recalculates targets after a profile weight/goal/activity change. Returns
+ * an error string (for the chat thread) or null. Keeps every path that moves
+ * these fields consistent with logWeight's behaviour.
+ */
+async function recalcTargets(
+  supabase: ServerClient,
+  profile: Profile,
+  opts: { weightKg?: number; goal?: Goal; activityLevel?: ActivityLevel; force?: boolean } = {},
+): Promise<string | null> {
+  const kg = opts.weightKg ?? Number(profile.weight_kg ?? 0);
+  if (!opts.force && kg <= 0) return null;
+  if (!profile.sex || !profile.height_cm || kg <= 0) return null;
+
+  const { targets, breakdown } = calculateTargets({
+    sex: profile.sex,
+    age: profile.date_of_birth ? ageFromDob(profile.date_of_birth) : 30,
+    heightCm: Number(profile.height_cm),
+    weightKg: kg,
+    activityLevel: opts.activityLevel ?? profile.activity_level ?? "moderate",
+    goal: opts.goal ?? profile.goal ?? "maintenance",
+  });
+  const patch: Record<string, unknown> = {
+    targets_cache: { targets, breakdown },
+    targets_version: profile.targets_version + 1,
+  };
+  if (opts.weightKg != null) patch.weight_kg = kg;
+  const { error } = await supabase.from("profiles").update(patch).eq("id", profile.id);
+  return error?.message ?? null;
+}
 
 export async function executeMutationAction(
   action: AssistantAction,
@@ -518,6 +647,7 @@ export async function executeMutationAction(
           protein_g: i.proteinG,
           carbs_g: i.carbsG,
           fat_g: i.fatG,
+          fiber_g: i.fiberG ?? null,
           source: "ai_chat",
         })),
       );
@@ -808,6 +938,252 @@ export async function executeMutationAction(
       });
       if (error) return { ok: false, message: error.message };
       return { ok: true, message: `Tagged a ${action.kind} on “${recipe.title}”.` };
+    }
+
+    case "add_intake_item": {
+      const date = action.date ?? istDateISO();
+      const slot = action.slot ?? slotForNow();
+      const { error } = await supabase.from("intake_logs").insert({
+        member_id: profile.id,
+        logged_on: date,
+        slot,
+        description: action.description,
+        kcal: action.kcal,
+        protein_g: action.protein_g ?? 0,
+        carbs_g: action.carbs_g ?? 0,
+        fat_g: action.fat_g ?? 0,
+        fiber_g: action.fiber_g ?? null,
+        source: "manual",
+      });
+      if (error) return { ok: false, message: error.message };
+      return { ok: true, message: `Logged ${action.description} (${Math.round(action.kcal)} kcal) to ${slot} on ${date}.` };
+    }
+
+    case "update_intake_item": {
+      const { data: existing } = await supabase
+        .from("intake_logs")
+        .select("id, description")
+        .eq("id", action.item_id)
+        .eq("member_id", profile.id)
+        .maybeSingle();
+      if (!existing) return { ok: false, message: "That logged item was not found (it may already be deleted)." };
+
+      const patch: Record<string, unknown> = {};
+      if (action.description != null) patch.description = action.description;
+      if (action.kcal != null) patch.kcal = action.kcal;
+      if (action.protein_g != null) patch.protein_g = action.protein_g;
+      if (action.carbs_g != null) patch.carbs_g = action.carbs_g;
+      if (action.fat_g != null) patch.fat_g = action.fat_g;
+      if (action.fiber_g != null) patch.fiber_g = action.fiber_g;
+      if (action.slot != null) patch.slot = action.slot;
+      if (action.date != null) patch.logged_on = action.date;
+
+      const { error } = await supabase
+        .from("intake_logs")
+        .update(patch)
+        .eq("id", action.item_id)
+        .eq("member_id", profile.id);
+      if (error) return { ok: false, message: error.message };
+      return { ok: true, message: `Updated “${action.description ?? existing.description ?? "the item"}”.` };
+    }
+
+    case "delete_intake_item": {
+      const { data: item } = await supabase
+        .from("intake_logs")
+        .select("id, description, kcal")
+        .eq("id", action.item_id)
+        .eq("member_id", profile.id)
+        .maybeSingle();
+      if (!item) return { ok: false, message: "That logged item was not found (it may already be deleted)." };
+      const { error } = await supabase
+        .from("intake_logs")
+        .delete()
+        .eq("id", action.item_id)
+        .eq("member_id", profile.id);
+      if (error) return { ok: false, message: error.message };
+      return { ok: true, message: `Deleted “${item.description ?? "item"}” (${Math.round(Number(item.kcal))} kcal).` };
+    }
+
+    case "reset_intake_day": {
+      const date = action.date ?? istDateISO();
+      let selectQuery = supabase
+        .from("intake_logs")
+        .select("id")
+        .eq("member_id", profile.id)
+        .eq("logged_on", date);
+      if (action.slot) selectQuery = selectQuery.eq("slot", action.slot);
+      const { data: rows, error: readError } = await selectQuery;
+      if (readError) return { ok: false, message: readError.message };
+      if (!rows || rows.length === 0) {
+        return { ok: true, message: `Nothing was logged on ${date}${action.slot ? ` (${action.slot})` : ""}.` };
+      }
+      const { error } = await supabase
+        .from("intake_logs")
+        .delete()
+        .in("id", rows.map((r) => r.id))
+        .eq("member_id", profile.id);
+      if (error) return { ok: false, message: error.message };
+      return {
+        ok: true,
+        message: `Cleared ${rows.length} item${rows.length === 1 ? "" : "s"} from ${date}${action.slot ? ` (${action.slot})` : ""}.`,
+      };
+    }
+
+    case "delete_weight_log": {
+      const date = action.date ?? istDateISO();
+      const { data: existing } = await supabase
+        .from("weight_logs")
+        .select("id, weight_kg")
+        .eq("member_id", profile.id)
+        .eq("logged_on", date)
+        .maybeSingle();
+      if (!existing) return { ok: false, message: `No weigh-in was logged on ${date}.` };
+
+      const { error } = await supabase
+        .from("weight_logs")
+        .delete()
+        .eq("id", existing.id)
+        .eq("member_id", profile.id);
+      if (error) return { ok: false, message: error.message };
+
+      // Keep profile.weight_kg on the newest remaining log so targets still
+      // follow the body rather than a deleted weigh-in.
+      const { data: latest } = await supabase
+        .from("weight_logs")
+        .select("weight_kg")
+        .eq("member_id", profile.id)
+        .order("logged_on", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latest && Number(latest.weight_kg) !== Number(profile.weight_kg)) {
+        const syncError = await recalcTargets(supabase, profile, { weightKg: Number(latest.weight_kg) });
+        if (syncError) return { ok: false, message: `Weigh-in deleted, but targets could not resync: ${syncError}` };
+      }
+      return { ok: true, message: `Deleted the ${date} weigh-in (${Number(existing.weight_kg)} kg).` };
+    }
+
+    case "delete_recipe": {
+      const { data: recipe } = await supabase
+        .from("recipes")
+        .select("id, title, owner_id")
+        .eq("id", action.recipe_id)
+        .maybeSingle();
+      if (!recipe) return { ok: false, message: "That recipe was not found." };
+      if (recipe.owner_id !== profile.id) {
+        return { ok: false, message: `Only the member who created “${recipe.title}” can delete it.` };
+      }
+      const { error } = await supabase
+        .from("recipes")
+        .delete()
+        .eq("id", recipe.id)
+        .eq("owner_id", profile.id);
+      if (error) return { ok: false, message: error.message };
+      return { ok: true, message: `Deleted “${recipe.title}”.` };
+    }
+
+    case "untag_recipe_media": {
+      const { data: media } = await supabase
+        .from("recipe_media")
+        .select("id, kind, url")
+        .eq("id", action.media_id)
+        .maybeSingle();
+      if (!media) return { ok: false, message: "That saved link was not found." };
+      const { error } = await supabase.from("recipe_media").delete().eq("id", action.media_id);
+      if (error) return { ok: false, message: error.message };
+      return { ok: true, message: `Removed that saved ${media.kind}.` };
+    }
+
+    case "add_shopping_item": {
+      const weekStart = mondayOf(istDateISO());
+      const name = action.item_name.toLowerCase();
+      const display = action.quantity ?? "1 unit";
+      const { data: list } = await supabase
+        .from("shopping_lists")
+        .select("id, items")
+        .eq("household_id", profile.household_id!)
+        .eq("week_start", weekStart)
+        .maybeSingle();
+      const items = ((list?.items as { name: string; display: string; checked: boolean }[] | null) ?? []).slice();
+      if (items.some((i) => i.name.toLowerCase() === name)) {
+        return { ok: true, message: `“${action.item_name}” is already on the shopping list.` };
+      }
+      items.push({ name, display, checked: false });
+      if (list) {
+        const { error } = await supabase.from("shopping_lists").update({ items }).eq("id", list.id);
+        if (error) return { ok: false, message: error.message };
+      } else {
+        const { error } = await supabase.from("shopping_lists").insert({
+          household_id: profile.household_id!,
+          week_start: weekStart,
+          items,
+          status: "open",
+        });
+        if (error) return { ok: false, message: error.message };
+      }
+      return { ok: true, message: `Added “${action.item_name}” (${display}) to the shopping list.` };
+    }
+
+    case "remove_shopping_item": {
+      const weekStart = mondayOf(istDateISO());
+      const { data: list } = await supabase
+        .from("shopping_lists")
+        .select("id, items")
+        .eq("household_id", profile.household_id!)
+        .eq("week_start", weekStart)
+        .maybeSingle();
+      if (!list) return { ok: false, message: "No shopping list for this week yet." };
+      const items = ((list.items as { name: string; display: string; checked: boolean }[] | null) ?? []).slice();
+      const needle = action.item_name.toLowerCase();
+      const index = items.findIndex(
+        (i) => i.name.toLowerCase().includes(needle) || i.display.toLowerCase().includes(needle),
+      );
+      if (index === -1) return { ok: false, message: `No list item matches “${action.item_name}”.` };
+      const [removed] = items.splice(index, 1);
+      const { error } = await supabase.from("shopping_lists").update({ items }).eq("id", list.id);
+      if (error) return { ok: false, message: error.message };
+      return { ok: true, message: `Removed “${removed.display === "1 unit" ? removed.name : `${removed.name} (${removed.display})`}” from the list.` };
+    }
+
+    case "set_pantry_quantity": {
+      const { data: item } = await supabase
+        .from("pantry_items")
+        .select("id, name, unit")
+        .eq("id", action.pantry_item_id)
+        .eq("household_id", profile.household_id!)
+        .maybeSingle();
+      if (!item) return { ok: false, message: "That pantry item was not found." };
+      const { error } = await supabase
+        .from("pantry_items")
+        .update({ quantity: action.quantity, updated_at: new Date().toISOString() })
+        .eq("id", item.id);
+      if (error) return { ok: false, message: error.message };
+      return { ok: true, message: `Set ${item.name} to ${action.quantity} ${item.unit}.` };
+    }
+
+    case "update_profile_prefs": {
+      const patch: Record<string, unknown> = {};
+      if (action.goal != null) patch.goal = action.goal;
+      if (action.diet_type != null) patch.diet_type = action.diet_type;
+      if (action.activity_level != null) patch.activity_level = action.activity_level;
+      if (action.budget_daily != null) patch.budget_daily = action.budget_daily;
+      if (action.target_weight_kg != null) patch.target_weight_kg = action.target_weight_kg;
+      if (action.weigh_in_time != null) patch.weigh_in_time = action.weigh_in_time;
+
+      const { error } = await supabase.from("profiles").update(patch).eq("id", profile.id);
+      if (error) return { ok: false, message: error.message };
+      const recalculated = action.goal != null || action.activity_level != null;
+      if (recalculated) {
+        const recalcError = await recalcTargets(supabase, profile, {
+          goal: action.goal,
+          activityLevel: action.activity_level,
+          force: true,
+        });
+        if (recalcError) return { ok: false, message: `Preferences saved, but targets could not recalculate: ${recalcError}` };
+      }
+      return {
+        ok: true,
+        message: `Preferences updated${recalculated ? " — daily targets recalculated" : ""}.`,
+      };
     }
 
     default:

@@ -152,6 +152,7 @@ const aiParseSchema = z.object({
         proteinG: z.coerce.number().min(0).max(300),
         carbsG: z.coerce.number().min(0).max(500),
         fatG: z.coerce.number().min(0).max(300),
+        fiberG: z.coerce.number().min(0).max(200).optional(),
       }),
     )
     .min(1)
@@ -159,7 +160,7 @@ const aiParseSchema = z.object({
 });
 
 const AI_LOG_SYSTEM = `You extract everything a person ATE from a short message (Hinglish, English, or food names with counts).
-Respond with ONLY JSON: {"items": [{"name": string, "kcal": number, "proteinG": number, "carbsG": number, "fatG": number}]}.
+Respond with ONLY JSON: {"items": [{"name": string, "kcal": number, "proteinG": number, "carbsG": number, "fatG": number, "fiberG": number}]}.
 Estimate nutrition for typical Indian home portions. One entry per distinct food item, name kept short.`;
 
 /** Freeform AI meal logging: "2 roti and dal, plus a mango" → intake rows. */
@@ -213,6 +214,7 @@ export async function aiLogIntakeAction(
       protein_g: i.proteinG,
       carbs_g: i.carbsG,
       fat_g: i.fatG,
+      fiber_g: i.fiberG ?? null,
       source: "ai_chat",
     })),
   );

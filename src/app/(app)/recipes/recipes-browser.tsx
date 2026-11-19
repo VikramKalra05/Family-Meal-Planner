@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { Recipe, RecipeNutrition } from "@/lib/db-types";
 import { healthScore, healthTags, type HealthTag } from "@/lib/nutrition/health";
-import { dishEmoji, parseMediaUrl, placeholderGradient } from "@/lib/media";
+import { dishEmoji, parseMediaUrl, placeholderGradient, recipeSearchLinks } from "@/lib/media";
 
 export interface RecipeCardData extends Recipe {
   recipe_nutrition: RecipeNutrition | null;
@@ -287,13 +287,14 @@ export function RecipesBrowser({ recipes }: { recipes: RecipeCardData[] }) {
           const n = r.recipe_nutrition;
           const art = cardArt(r);
           const videoCount = r.media.filter((m) => m.kind === "video").length;
+          const searchLinks = recipeSearchLinks(r.title);
 
           return (
-            <Link
+            <div
               key={r.id}
-              href={`/recipes/${r.id}`}
-              className="group overflow-hidden rounded-none bg-white border-2 border-neutral-900 shadow-[4px_4px_0_#111] transition-all duration-200 hover:-translate-y-1 hover:shadow-[6px_6px_0_#111]"
+              className="group relative overflow-hidden rounded-none border-2 border-neutral-900 bg-white shadow-[4px_4px_0_#111] transition-all duration-200 hover:-translate-y-1 hover:shadow-[6px_6px_0_#111]"
             >
+              <Link href={`/recipes/${r.id}`} className="block" aria-label={`Open ${r.title}`}>
               <div className={`relative aspect-[5/4] overflow-hidden ${placeholderGradient(r.cuisine)}`}>
                 {art ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -356,7 +357,33 @@ export function RecipesBrowser({ recipes }: { recipes: RecipeCardData[] }) {
                 </span>
                 <HealthPips n={n} />
               </div>
-            </Link>
+              </Link>
+
+              {/* Quick outbound searches — siblings of the Link so a tap
+                  never opens the recipe by accident. */}
+              <div className="absolute right-2 top-2 z-10 flex flex-col gap-1.5">
+                <a
+                  href={searchLinks.youtube}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`Search “${r.title}” on YouTube`}
+                  aria-label={`Search ${r.title} on YouTube`}
+                  className="flex h-7 w-7 items-center justify-center rounded-none border-2 border-neutral-900 bg-white text-[11px] font-extrabold text-neutral-900 shadow-[2px_2px_0_#111] transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:bg-red-100 hover:shadow-none"
+                >
+                  ▶
+                </a>
+                <a
+                  href={searchLinks.instagram}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`Search “${r.title}” on Instagram`}
+                  aria-label={`Search ${r.title} on Instagram`}
+                  className="flex h-7 w-7 items-center justify-center rounded-none border-2 border-neutral-900 bg-white text-[12px] font-extrabold text-neutral-900 shadow-[2px_2px_0_#111] transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:bg-pink-100 hover:shadow-none"
+                >
+                  ◎
+                </a>
+              </div>
+            </div>
           );
         })}
       </div>

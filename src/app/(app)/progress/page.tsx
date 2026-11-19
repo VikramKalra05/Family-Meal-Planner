@@ -17,7 +17,7 @@ export default async function ProgressPage() {
     .select("id, member_id, logged_on, weight_kg, source, created_at")
     .eq("member_id", profile.id)
     .order("logged_on", { ascending: true })
-    .limit(90);
+    .limit(365);
 
   const points: WeightPoint[] = (logs ?? [] as WeightLog[]).map((l) => ({
     date: l.logged_on,
@@ -95,9 +95,9 @@ export default async function ProgressPage() {
       {/* Chart */}
       <section className="rounded-none bg-white p-5 border-2 border-neutral-900 shadow-[4px_4px_0_#111]">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">
-          Weight trend · last {points.length} logs
+          Weight trend
         </h2>
-        <WeightChart points={points} targetKg={targetKg} />
+        <WeightChart points={points} targetKg={targetKg} today={istDateISO()} />
       </section>
 
       {/* Actions */}

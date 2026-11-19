@@ -42,6 +42,8 @@ export interface AssistantTurnResult {
   toolTrace: string[];
   proposal: AssistantProposal | null;
   error: string | null;
+  /** In-app path the assistant asked to open (open_page), if any. */
+  navigation: string | null;
   /** True when the user pressed Stop mid-turn. */
   stopped?: boolean;
   /** The conversation this turn belongs to (created if it was a new chat). */
@@ -234,21 +236,27 @@ export async function runAssistantTurn(
   provider: ResolvedProvider,
   signal: AbortSignal | undefined,
   conversationId: string | null | undefined,
+  currentPage?: string,
 ): Promise<AssistantTurnResult> {
   // Stop path: persist a thread note so history reflects the cancellation,
   // skip any assistant reply, and tell the client.
   const returnStopped = async (conv: string | null): Promise<AssistantTurnResult> => {
     await persistMessage(profile.id, "system", "⏹ Stopped — the partial answer was discarded.", { kind: "stopped" }, conv);
-    return { reply: "", toolTrace: [], proposal: null, error: null, stopped: true, conversationId: conv, modelLabel: "" };
+    return { reply: "", toolTrace: [], proposal: null, error: null, navigation: null, stopped: true, conversationId: conv, modelLabel: "" };
   };
 
   const conversation = await ensureConversation(profile.id, conversationId, userText);
   await persistMessage(profile.id, "user", userText, undefined, conversation);
 
-  const [snapshot, thread] = await Promise.all([
+  const [contextSnapshot, thread] = await Promise.all([
     buildContextSnapshot(profile),
     conversation ? loadThread(profile.id, conversation) : Promise.resolve({ messages: [], error: null } as ThreadLoad),
   ]);
+  // Where the member is right now, so "remove this" / "log here" has context.
+  const snapshot =
+    currentPage && currentPage.startsWith("/")
+      ? { ...contextSnapshot, current_page: currentPage.slice(0, 160) }
+      : contextSnapshot;
   // The just-stored user message is the last history entry; the model gets
   // system + prior history + the fresh user line.
   const priorHistory = thread.messages.slice(0, -1);
@@ -259,6 +267,21 @@ export async function runAssistantTurn(
   ];
 
   const toolTrace: string[] = [];
+  /** Last page the model asked the app to open this turn. */
+  let navigation: string | null = null;
+
+  /** Runs open_page actions and remembers the path for the client. */
+  const runNavigation = async (navActions: AssistantAction[]): Promise<unknown[]> => {
+    const results: unknown[] = [];
+    for (const nav of navActions) {
+      const result = await executeReadAction(nav, profile);
+      toolTrace.push(result.message);
+      const path = (result.data as { path?: string } | undefined)?.path;
+      if (result.ok && path) navigation = path;
+      results.push({ action: nav.action, ok: result.ok, data: result.ok ? result.data : result.message });
+    }
+    return results;
+  };
 
   for (let step = 0; step < MAX_STEPS; step += 1) {
     if (signal?.aborted) return await returnStopped(conversation);
@@ -277,28 +300,32 @@ export async function runAssistantTurn(
           ? e.message
           : "Rasoi AI hit a snag thinking — try again in a moment.";
       await persistMessage(profile.id, "system", `error: ${error}`, { kind: "error" }, conversation);
-      return { reply: "", toolTrace: [], proposal: null, error, conversationId: conversation, modelLabel: "" };
+      return { reply: "", toolTrace: [], proposal: null, error, navigation: null, conversationId: conversation, modelLabel: "" };
     }
 
     const actions = turn.actions ?? [];
+    const navigationActions = actions.filter((a) => a.action === "open_page");
     const mutation = actions.find((a) => !isReadAction(a));
 
     if (mutation) {
+      // Navigation is safe — run it now so the page is ready if they confirm.
+      if (navigationActions.length > 0) await runNavigation(navigationActions);
       const proposal: AssistantProposal = { action: mutation, summary: summarizeAction(mutation) };
       const modelLabel = `${provider.label} · ${provider.model}`;
       await persistMessage(profile.id, "assistant", turn.reply, { tools: toolTrace, proposal, model: modelLabel }, conversation);
-      return { reply: turn.reply, toolTrace, proposal, error: null, conversationId: conversation ?? null, modelLabel };
+      return { reply: turn.reply, toolTrace, proposal, error: null, navigation, conversationId: conversation ?? null, modelLabel };
     }
 
     if (actions.length === 0) {
       const modelLabel = `${provider.label} · ${provider.model}`;
       await persistMessage(profile.id, "assistant", turn.reply, { tools: toolTrace, model: modelLabel }, conversation);
-      return { reply: turn.reply, toolTrace, proposal: null, error: null, conversationId: conversation ?? null, modelLabel };
+      return { reply: turn.reply, toolTrace, proposal: null, error: null, navigation, conversationId: conversation ?? null, modelLabel };
     }
 
     // Reads: execute all, feed results back, loop again for the final answer.
-    const results = [];
-    for (const readAction of actions.filter(isReadAction)) {
+    const results: unknown[] = [];
+    if (navigationActions.length > 0) results.push(...(await runNavigation(navigationActions)));
+    for (const readAction of actions.filter((a) => isReadAction(a) && a.action !== "open_page")) {
       const result = await executeReadAction(readAction, profile);
       toolTrace.push(result.message);
       results.push({ action: readAction.action, ok: result.ok, data: result.ok ? result.data : result.message });
@@ -324,13 +351,13 @@ export async function runAssistantTurn(
     });
     const modelLabel = `${provider.label} · ${provider.model}`;
     await persistMessage(profile.id, "assistant", finalTurn.reply, { tools: toolTrace, model: modelLabel }, conversation);
-    return { reply: finalTurn.reply, toolTrace, proposal: null, error: null, conversationId: conversation ?? null, modelLabel };
+    return { reply: finalTurn.reply, toolTrace, proposal: null, error: null, navigation, conversationId: conversation ?? null, modelLabel };
   } catch {
     if (signal?.aborted) return await returnStopped(conversation);
     const reply = "I gathered the data but ran out of room to finish the answer — try asking again.";
     const modelLabel = `${provider.label} · ${provider.model}`;
     await persistMessage(profile.id, "assistant", reply, { tools: toolTrace, model: modelLabel }, conversation);
-    return { reply, toolTrace, proposal: null, error: null, conversationId: conversation, modelLabel };
+    return { reply, toolTrace, proposal: null, error: null, navigation, conversationId: conversation, modelLabel };
   }
 }
 

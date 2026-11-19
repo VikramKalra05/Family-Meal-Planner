@@ -39,6 +39,12 @@ const queryIntakeHistory = z.object({
   days: z.coerce.number().int().min(1).max(30).optional(),
 });
 
+const queryIntakeDay = z.object({
+  action: z.literal("query_intake_day"),
+  /** Day to inspect; defaults to today (IST). */
+  date: isoDate.optional(),
+});
+
 const searchRecipes = z.object({
   action: z.literal("search_recipes"),
   q: z.string().trim().min(1).max(60).optional(),
@@ -71,6 +77,28 @@ const suggestDishes = z.object({
   member: z.string().trim().min(1).max(60).optional(),
   max_kcal: z.coerce.number().min(50).max(2000).optional(),
 });
+
+/** In-app navigation ("take me to Progress", "open that recipe"). */
+const openPage = z
+  .object({
+    action: z.literal("open_page"),
+    page: z.enum([
+      "today",
+      "week",
+      "recipes",
+      "pantry",
+      "shopping",
+      "progress",
+      "family",
+      "settings",
+      "recipe",
+    ]),
+    /** Recipe id or title when page = "recipe". */
+    recipe_ref: z.string().trim().min(1).max(120).optional(),
+  })
+  .refine((v) => v.page !== "recipe" || v.recipe_ref != null, {
+    message: "recipe_ref is required for the recipe page",
+  });
 
 // ── Mutation actions (confirmation required) ────────────────────────────────
 
@@ -156,10 +184,117 @@ const tagRecipeMedia = z.object({
   label: z.string().trim().min(1).max(60).optional(),
 });
 
+// ── Intake repair (the "that was yesterday's food" set) ─────────────────────
+
+const addIntakeItem = z.object({
+  action: z.literal("add_intake_item"),
+  description: z.string().trim().min(1).max(120),
+  kcal: z.coerce.number().min(0).max(5000),
+  protein_g: z.coerce.number().min(0).max(400).optional(),
+  carbs_g: z.coerce.number().min(0).max(600).optional(),
+  fat_g: z.coerce.number().min(0).max(400).optional(),
+  fiber_g: z.coerce.number().min(0).max(200).optional(),
+  slot: slotEnum.optional(),
+  date: isoDate.optional(),
+});
+
+const updateIntakeItem = z
+  .object({
+    action: z.literal("update_intake_item"),
+    item_id: uuid,
+    description: z.string().trim().min(1).max(120).optional(),
+    kcal: z.coerce.number().min(0).max(5000).optional(),
+    protein_g: z.coerce.number().min(0).max(400).optional(),
+    carbs_g: z.coerce.number().min(0).max(600).optional(),
+    fat_g: z.coerce.number().min(0).max(400).optional(),
+    fiber_g: z.coerce.number().min(0).max(200).optional(),
+    slot: slotEnum.optional(),
+    date: isoDate.optional(),
+  })
+  .refine(
+    (v) =>
+      v.description != null ||
+      v.kcal != null ||
+      v.protein_g != null ||
+      v.carbs_g != null ||
+      v.fat_g != null ||
+      v.fiber_g != null ||
+      v.slot != null ||
+      v.date != null,
+    { message: "Provide at least one field to update" },
+  );
+
+const deleteIntakeItem = z.object({
+  action: z.literal("delete_intake_item"),
+  item_id: uuid,
+});
+
+const resetIntakeDay = z.object({
+  action: z.literal("reset_intake_day"),
+  date: isoDate.optional(),
+  slot: slotEnum.optional(),
+});
+
+// ── Everything else the app can do ──────────────────────────────────────────
+
+const deleteWeightLog = z.object({
+  action: z.literal("delete_weight_log"),
+  date: isoDate.optional(),
+});
+
+const deleteRecipe = z.object({
+  action: z.literal("delete_recipe"),
+  recipe_id: uuid,
+});
+
+const untagRecipeMedia = z.object({
+  action: z.literal("untag_recipe_media"),
+  media_id: uuid,
+});
+
+const addShoppingItem = z.object({
+  action: z.literal("add_shopping_item"),
+  item_name: z.string().trim().min(1).max(80),
+  quantity: z.string().trim().min(1).max(40).optional(),
+});
+
+const removeShoppingItem = z.object({
+  action: z.literal("remove_shopping_item"),
+  item_name: z.string().trim().min(1).max(80),
+});
+
+const setPantryQuantity = z.object({
+  action: z.literal("set_pantry_quantity"),
+  pantry_item_id: uuid,
+  quantity: z.coerce.number().min(0).max(100000),
+});
+
+const updateProfilePrefs = z
+  .object({
+    action: z.literal("update_profile_prefs"),
+    goal: z.enum(["weight_loss", "maintenance", "muscle_gain"]).optional(),
+    diet_type: z.enum(["veg", "egg", "non_veg"]).optional(),
+    activity_level: z.enum(["sedentary", "light", "moderate", "active", "very_active"]).optional(),
+    budget_daily: z.coerce.number().min(0).max(100000).optional(),
+    target_weight_kg: z.coerce.number().min(25).max(250).optional(),
+    weigh_in_time: hhmm.optional(),
+  })
+  .refine(
+    (v) =>
+      v.goal != null ||
+      v.diet_type != null ||
+      v.activity_level != null ||
+      v.budget_daily != null ||
+      v.target_weight_kg != null ||
+      v.weigh_in_time != null,
+    { message: "Provide at least one preference to change" },
+  );
+
 export const assistantActionSchema = z.discriminatedUnion("action", [
   queryWeek,
   queryToday,
   queryIntakeHistory,
+  queryIntakeDay,
   searchRecipes,
   recipeDetail,
   queryPantry,
@@ -168,6 +303,7 @@ export const assistantActionSchema = z.discriminatedUnion("action", [
   queryFamily,
   queryUsage,
   suggestDishes,
+  openPage,
   logMeal,
   logWeight,
   addRecipe,
@@ -182,6 +318,17 @@ export const assistantActionSchema = z.discriminatedUnion("action", [
   sendFamilyMessage,
   setWeighInReminder,
   tagRecipeMedia,
+  addIntakeItem,
+  updateIntakeItem,
+  deleteIntakeItem,
+  resetIntakeDay,
+  deleteWeightLog,
+  deleteRecipe,
+  untagRecipeMedia,
+  addShoppingItem,
+  removeShoppingItem,
+  setPantryQuantity,
+  updateProfilePrefs,
 ]);
 
 export type AssistantAction = z.infer<typeof assistantActionSchema>;
@@ -191,6 +338,7 @@ export const READ_ACTIONS: ReadonlySet<AssistantActionName> = new Set([
   "query_week",
   "query_today",
   "query_intake_history",
+  "query_intake_day",
   "search_recipes",
   "recipe_detail",
   "query_pantry",
@@ -199,6 +347,7 @@ export const READ_ACTIONS: ReadonlySet<AssistantActionName> = new Set([
   "query_family",
   "query_usage",
   "suggest_dishes",
+  "open_page",
 ]);
 
 export function isReadAction(action: AssistantAction): boolean {
@@ -250,6 +399,37 @@ export function summarizeAction(action: AssistantAction): string {
     }
     case "tag_recipe_media":
       return `Tag a ${action.kind} on that recipe`;
+    case "add_intake_item":
+      return `Log ${action.description} — ${Math.round(action.kcal)} kcal${action.slot ? ` (${action.slot})` : ""}`;
+    case "update_intake_item":
+      return `Edit that logged food${action.description ? ` → “${truncate(action.description, 50)}”` : ""}`;
+    case "delete_intake_item":
+      return "Delete that logged food item";
+    case "reset_intake_day":
+      return `Clear intake for ${action.date ?? "today"}${action.slot ? ` (${action.slot})` : " (whole day)"}`;
+    case "delete_weight_log":
+      return `Delete the weigh-in for ${action.date ?? "today"}`;
+    case "delete_recipe":
+      return "Delete that recipe (only recipes you own)";
+    case "untag_recipe_media":
+      return "Remove that saved video/photo tag";
+    case "add_shopping_item":
+      return `Add “${truncate(action.item_name, 50)}” to the shopping list${action.quantity ? ` (${action.quantity})` : ""}`;
+    case "remove_shopping_item":
+      return `Remove “${truncate(action.item_name, 50)}” from the shopping list`;
+    case "set_pantry_quantity":
+      return `Set that pantry item to ${action.quantity}`;
+    case "update_profile_prefs": {
+      const parts = [
+        action.goal ? `goal ${action.goal.replace("_", " ")}` : null,
+        action.diet_type ? `diet ${action.diet_type.replace("_", " ")}` : null,
+        action.activity_level ? `activity ${action.activity_level.replace("_", " ")}` : null,
+        action.budget_daily != null ? `budget ₹${action.budget_daily}/day` : null,
+        action.target_weight_kg != null ? `target ${action.target_weight_kg} kg` : null,
+        action.weigh_in_time ? `weigh-in ${action.weigh_in_time}` : null,
+      ].filter(Boolean);
+      return `Update your preferences: ${parts.join(", ")}`;
+    }
     default: {
       // Reads never reach the card, but keep the exhaustiveness honest.
       const label = (action as { action: string }).action.replaceAll("_", " ");

@@ -64,6 +64,32 @@ describe("assistantActionSchema", () => {
         .success,
     ).toBe(false);
   });
+
+  it("accepts intake repair actions and treats navigation as a read", () => {
+    const del = assistantActionSchema.parse({ action: "delete_intake_item", item_id: UUID });
+    expect(isReadAction(del)).toBe(false);
+    expect(assistantActionSchema.safeParse({ action: "reset_intake_day", date: "2026-11-18" }).success).toBe(true);
+    expect(assistantActionSchema.safeParse({ action: "update_intake_item", item_id: UUID, kcal: 300 }).success).toBe(true);
+    expect(assistantActionSchema.safeParse({ action: "update_intake_item", item_id: UUID }).success).toBe(false);
+
+    const open = assistantActionSchema.parse({ action: "open_page", page: "progress" });
+    expect(isReadAction(open)).toBe(true);
+    expect(assistantActionSchema.safeParse({ action: "open_page", page: "recipe" }).success).toBe(false);
+    expect(assistantActionSchema.safeParse({ action: "open_page", page: "recipe", recipe_ref: "Aloo Mutter" }).success).toBe(true);
+  });
+
+  it("validates the new management actions", () => {
+    expect(
+      assistantActionSchema.safeParse({
+        action: "update_profile_prefs",
+        goal: "weight_loss",
+        activity_level: "active",
+      }).success,
+    ).toBe(true);
+    expect(assistantActionSchema.safeParse({ action: "update_profile_prefs" }).success).toBe(false);
+    expect(assistantActionSchema.safeParse({ action: "delete_recipe", recipe_id: UUID }).success).toBe(true);
+    expect(assistantActionSchema.safeParse({ action: "add_shopping_item", item_name: "curd", quantity: "2 kg" }).success).toBe(true);
+  });
 });
 
 describe("chatTurnSchema", () => {

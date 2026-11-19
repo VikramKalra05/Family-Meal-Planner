@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { AiWorking } from "@/components/ai-working";
 import { saveChatLanguage } from "@/app/(app)/settings/actions";
 import { CHAT_LANGUAGES, chatLanguageLabel } from "@/lib/ai/assistant/languages";
@@ -94,7 +95,7 @@ function splitModelKey(key: string): { provider_id?: string; model?: string } {
 const SUGGESTIONS = [
   "What's for dinner Thursday?",
   "Log 2 roti and dal for lunch",
-  "What can I cook with my pantry?",
+  "What did I eat yesterday?",
   "How's my protein this week?",
 ];
 
@@ -128,6 +129,8 @@ export function AssistantLauncher() {
 }
 
 function AssistantPanel({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [messages, setMessages] = useState<PanelMessage[]>([]);
   const [provider, setProvider] = useState<{ label: string; model: string } | null | undefined>(undefined);
   const [providers, setProviders] = useState<ProviderOption[]>([]);
@@ -300,6 +303,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
             message: trimmed,
             ...splitModelKey(selectedModelKey),
             ...(conversationId ? { conversation_id: conversationId } : {}),
+            page: pathname,
           }),
           signal: ac.signal,
         });
@@ -309,6 +313,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           proposal?: Proposal | null;
           error?: string;
           stopped?: boolean;
+          navigation?: string | null;
           conversationId?: string | null;
           modelLabel?: string;
         };
@@ -336,6 +341,8 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
               state: data.proposal ? "pending" : undefined,
             },
           ]);
+          // The assistant can open a page while answering ("take me there").
+          if (data.navigation) router.push(data.navigation);
         }
       } catch (e) {
         if (ac.signal.aborted || (e as Error).name === "AbortError") {
@@ -370,6 +377,8 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           ...prev.map((m) => (m.key === messageKey ? { ...m, state: "confirmed" as const } : m)),
           { key: `r${Date.now()}`, role: "assistant" as const, content: `${data.ok ? "✅" : "⚠️"} ${message}` },
         ]);
+        // The page behind the dock must reflect the confirmed write.
+        if (data.ok) router.refresh();
       } catch {
         setError("Network error while confirming — check the app before retrying.");
       } finally {
@@ -615,8 +624,8 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
             <div className="space-y-3 px-1">
               <div className="border-2 border-neutral-900 bg-lime-200 p-3 text-xs font-medium text-neutral-900 shadow-[2px_2px_0_#111]">
                 Namaste! I can answer anything about your plans, meals, pantry, weight and family — and I can{" "}
-                <strong>do</strong> things for you (log meals, add recipes, regenerate the week…) after you
-                confirm each change.
+                <strong>do</strong> things for you (log meals, fix the food diary, clear a bad day, add recipes,
+                regenerate the week…) after you confirm each change.
               </div>
               {Object.keys(memberMap).length > 0 && (
                 <div className="border-2 border-neutral-900 bg-white p-2.5 text-[10px] text-neutral-600 shadow-[2px_2px_0_#111]">
