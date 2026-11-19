@@ -8,6 +8,12 @@ import { checkRate, rateLimited } from "@/lib/rate-limit";
 import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
 import { istDateISO, istHour } from "@/lib/date";
+import {
+  MEAL_PARSE_SYSTEM,
+  intakeDescription,
+  mealParseSchema,
+  type MealParseItem,
+} from "@/lib/ai/meal-parse";
 
 export type IntakeActionState = { error: string | null; ok: string | null };
 
@@ -143,26 +149,6 @@ export async function cravingAction(
   };
 }
 
-const aiParseSchema = z.object({
-  items: z
-    .array(
-      z.object({
-        name: z.string().min(1).max(80),
-        kcal: z.coerce.number().min(0).max(3000),
-        proteinG: z.coerce.number().min(0).max(300),
-        carbsG: z.coerce.number().min(0).max(500),
-        fatG: z.coerce.number().min(0).max(300),
-        fiberG: z.coerce.number().min(0).max(200).optional(),
-      }),
-    )
-    .min(1)
-    .max(15),
-});
-
-const AI_LOG_SYSTEM = `You extract everything a person ATE from a short message (Hinglish, English, or food names with counts).
-Respond with ONLY JSON: {"items": [{"name": string, "kcal": number, "proteinG": number, "carbsG": number, "fatG": number, "fiberG": number}]}.
-Estimate nutrition for typical Indian home portions. One entry per distinct food item, name kept short.`;
-
 /** Freeform AI meal logging: "2 roti and dal, plus a mango" → intake rows. */
 export async function aiLogIntakeAction(
   _prev: IntakeActionState,
@@ -176,13 +162,13 @@ export async function aiLogIntakeAction(
   if (!provider) return { error: "No AI provider configured — add one in Settings → AI Providers, or use the craving form to log the calories manually.", ok: null };
   if (!checkRate(`ailog:${profile.id}`, 30, 60 * 60 * 1000)) return { error: rateLimited(30, 60 * 60 * 1000), ok: null };
 
-  let items: z.infer<typeof aiParseSchema>["items"];
+  let items: MealParseItem[];
   try {
     const parsed = await chatJson(
       provider,
-      aiParseSchema,
+      mealParseSchema,
       [
-        { role: "system", content: AI_LOG_SYSTEM },
+        { role: "system", content: MEAL_PARSE_SYSTEM },
         { role: "user", content: text.data },
       ],
       // Reasoning models burn part of the budget before writing JSON, so this
@@ -209,7 +195,7 @@ export async function aiLogIntakeAction(
       member_id: profile.id,
       logged_on: today,
       slot,
-      description: i.name,
+      description: intakeDescription(i),
       kcal: i.kcal,
       protein_g: i.proteinG,
       carbs_g: i.carbsG,
