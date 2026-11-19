@@ -18,6 +18,7 @@ import {
 import { loadPlanData, loadPantry } from "@/lib/plan-data";
 import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
+import { weekTargets } from "@/lib/gym/fuel";
 
 /**
  * Creates (or force-regenerates) the household's plan for a week and stores
@@ -29,7 +30,20 @@ export async function generateWeekAction(formData: FormData): Promise<void> {
   const supabase = await createClient();
 
   const { plannerRecipes, members } = await loadPlanData(profile);
-  const entries = generateWeek({ recipes: plannerRecipes, members, weekStart });
+
+  // Per-member training calendars → per-date targets. The plan is generated
+  // against each day's carb-cycled target, not a flat weekly average.
+  const ids = members.map((m) => m.id);
+  const { data: gymRows } = ids.length
+    ? await supabase.from("gyms").select("member_id, training_days").in("member_id", ids)
+    : { data: [] as { member_id: string; training_days: number[] }[] };
+  const gymByMember = new Map((gymRows ?? []).map((g) => [g.member_id, (g.training_days ?? []) as number[]]));
+  const membersWithDays: PlannerMember[] = members.map((m) => ({
+    ...m,
+    targetsByDate: weekTargets(m.targets, weekStart, gymByMember.get(m.id) ?? []),
+  }));
+
+  const entries = generateWeek({ recipes: plannerRecipes, members: membersWithDays, weekStart });
 
   const { data: plan } = await supabase
     .from("weekly_plans")

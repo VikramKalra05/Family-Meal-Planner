@@ -4,6 +4,9 @@ import { requireFullProfile } from "@/lib/profile";
 import { loadPlanData } from "@/lib/plan-data";
 import { mondayOf, SLOT_KEYS } from "@/lib/planner";
 import { formatIstDate, istDateISO } from "@/lib/date";
+import { getGym } from "@/lib/gym/data";
+import { applyCalorieAdjustment, dayFuel } from "@/lib/gym/fuel";
+import { weekdayIndex } from "@/lib/gym/types";
 import { generateWeekAction, removeEntryAction, setEntryStatusAction } from "./actions";
 import { SubmitButton } from "@/components/submit-button";
 
@@ -34,7 +37,8 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
 
   const profile = await requireFullProfile();
   const supabase = await createClient();
-  const { members, recipesById } = await loadPlanData(profile);
+  const planData = await loadPlanData(profile);
+  const { members, recipesById } = planData;
 
   // One query: plan + its entries. The old two-step read added a full
   // Supabase round trip to every week view.
@@ -60,6 +64,7 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
   const viewMemberId =
     typeof m === "string" && members.some((mm) => mm.id === m) ? m : profile.id;
   const viewMember = members.find((mm) => mm.id === viewMemberId);
+  const viewGym = await getGym(viewMemberId);
 
   const portionOf = (e: (typeof rows)[number]) =>
     e.member_portions?.[e.member_id ?? viewMemberId] ??
@@ -93,11 +98,26 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
     formatIstDate(d, { weekday: "short", day: "numeric" });
 
   const hasPlan = !!planRow && rows.length > 0;
-  const targetKcal = profile.targets_cache?.targets.kcal ?? null;
+  const trainingDays = viewGym?.training_days ?? [];
+  // `loadPlanData` already applied each member's adaptive offset.
+  const baseTargets =
+    viewMember?.targets ??
+    (profile.targets_cache
+      ? applyCalorieAdjustment(profile.targets_cache.targets, profile.calorie_adjustment_kcal ?? 0)
+      : null);
+  const targetKcal = baseTargets?.kcal ?? null;
+  const targetFor = (date: string): number | null =>
+    baseTargets
+      ? dayFuel(baseTargets, {
+          isTrainingDay: trainingDays.includes(weekdayIndex(date)),
+          trainingDaysPerWeek: trainingDays.length,
+        }).kcal
+      : null;
   const dayTotals = days.map((date) => {
     const total = SLOT_KEYS.reduce((sum, slot) => sum + (cellFor(date, slot)?.kcal ?? 0), 0);
-    const gap = targetKcal && targetKcal > 0 ? Math.abs(total - targetKcal) / targetKcal : null;
-    return { date, total, gap };
+    const target = targetFor(date);
+    const gap = target && target > 0 ? Math.abs(total - target) / target : null;
+    return { date, total, gap, target };
   });
   const worstGap = dayTotals.reduce((max, d) => Math.max(max, d.gap ?? 0), 0);
 
@@ -139,12 +159,11 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
       {hasPlan && targetKcal && worstGap > 0.12 && (
         <div className="border-2 border-neutral-900 bg-amber-200 px-4 py-3 text-sm shadow-[3px_3px_0_#111]">
           <p className="font-extrabold uppercase tracking-wide">
-            ⚠ This plan is off your {targetKcal} kcal target by up to{" "}
-            {Math.round(worstGap * 100)}%
+            ⚠ This plan is off your daily target by up to {Math.round(worstGap * 100)}%
           </p>
           <p className="mt-0.5 text-xs text-neutral-700">
-            Hit <span className="font-bold">Regenerate</span> to refit every day to your target — portions
-            are scaled per member, so the whole day should land within a few percent.
+            Targets shift with training days — hit <span className="font-bold">Regenerate</span> to refit every
+            day. Portions are scaled per member, so the whole day should land within a few percent.
           </p>
         </div>
       )}
@@ -188,6 +207,11 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
                 {days.map((d) => (
                   <th key={d} className="border-r-2 border-neutral-900 px-2 py-2.5 text-center text-sm font-extrabold uppercase tracking-wide text-neutral-900 last:border-r-0">
                     {dayLabel(d)}
+                    {trainingDays.includes(weekdayIndex(d)) && (
+                      <span className="mt-0.5 block text-[9px] font-extrabold normal-case tracking-normal text-violet-700">
+                        🏋️ training
+                      </span>
+                    )}
                   </th>
                 ))}
               </tr>
@@ -260,7 +284,7 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
                 <th className="border-r-2 border-neutral-900 px-2.5 py-2 text-left text-xs font-extrabold uppercase tracking-widest text-neutral-500">
                   Day total
                 </th>
-                {dayTotals.map(({ date, total, gap }) => {
+                {dayTotals.map(({ date, total, gap, target }) => {
                   const off = gap != null && gap > 0.12;
                   return (
                     <td
@@ -272,12 +296,12 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
                       <p className="text-sm font-extrabold">
                         {total > 0 ? `${total} kcal` : "—"}
                       </p>
-                      {targetKcal != null && total > 0 && (
+                      {target != null && total > 0 && (
                         <p className={`text-[9px] font-bold uppercase tracking-wide ${off ? "text-red-700" : "text-neutral-400"}`}>
-                          target {targetKcal}
+                          target {target}
                           {gap != null && (
                             <span className="ml-1">
-                              ({total >= targetKcal ? "+" : "−"}
+                              ({total >= target ? "+" : "−"}
                               {Math.round(gap * 100)}%)
                             </span>
                           )}

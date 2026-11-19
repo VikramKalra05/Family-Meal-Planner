@@ -51,6 +51,51 @@ npm run dev
 | M5        | Kitchen Mode, family suggestions/instructions feed                           | ✅ done |
 | M6        | Evaluation module (E1/E4), PWA (sw + share target), attribution, neobrutalist design | ✅ done |
 | M7        | Background web push (weigh-in reminders with the app closed, VAPID + server scheduler) | ✅ done |
+| M8        | **Gym module** — photo-based equipment setup, equipment-aware programs, offline-first set logging, plate calculator, streak, measurements/photos, training-day carb cycling, adaptive weekly loop | ✅ built |
+
+## Gym module (M8)
+
+A training surface that shares the same profile, targets and planner as the
+nutrition side.
+
+- **Setup** (`/gym/setup`): tick the equipment your gym actually has (photos,
+  famous machines first), set training days, calibrate unlabelled plates by
+  colour/size, pick a split (full body 3×, upper/lower 4×, PPL, bro split,
+  home dumbbell). The builder drops exercises your equipment can't support.
+- **Logging** (`/gym/workout/[id]`): weight-first set rows, last-session
+  prefill, one-tap copy, plate calculator with both directions
+  (target → plates, plates → total), and an IndexedDB write queue. Sets land
+  on the phone instantly; the queue flushes on reconnect, on tab focus, every
+  30 s, and through the service worker's Background Sync where supported
+  (Android Chrome; iOS Safari flushes on reopen).
+- **Plate calculator** (`src/lib/gym/plates.ts`): bounded-knapsack solver over
+  the gym's actual inventory, canonical kg storage with the display unit and a
+  plate snapshot on every set.
+- **Progress** (`/gym/progress`): e1RM trends, hard sets per muscle vs the
+  8–20 band, body measurements, private progress photos (signed URLs), and the
+  weekly adaptive check-in.
+- **Streak** (`/gym/history`): scheduled days only — rest days are neutral,
+  today is never "missed", one freeze per calendar month.
+- **Nutrition interlock**: training days get +~6% kcal (carbs), rest days
+  absorb the offset so the weekly total is unchanged. The planner generates
+  against each day's target, not a flat weekly average. The weekly outcome
+  loop reads weight trend + strength trend + waist and *suggests* a ±150 kcal
+  adjustment; it never changes targets silently.
+
+**Apply** `supabase/migrations/0017_gym.sql` once. It creates the gym tables,
+RLS policies, the private `progress-photos` bucket and its storage policies.
+The exercise library lives in `src/data/seed-exercises.ts` (no seed step).
+
+**Design decisions**
+
+- Seed exercises are code, referenced by stable keys (`seed:bench-press`).
+  Custom exercises live in `custom_exercises` and merge at read time.
+- No "calories burned" estimates. MET numbers are noisy and would double-count
+  the activity multiplier; training only redistributes the weekly calories.
+- The adaptive loop is deterministic, explainable, and suggest-only.
+- Gym maths (`src/lib/gym/*`) is isomorphic pure functions, unit-tested in
+  `src/lib/gym/gym.test.ts`, so the offline client, the server and the
+  assistant share one implementation.
 
 ## Deploying to Vercel
 

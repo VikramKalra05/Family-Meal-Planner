@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/db-types";
 import type { PlannerMember, PlannerRecipe, RecipeItemsInfo } from "@/lib/planner";
 import type { NutrientTargets } from "@/lib/nutrition/types";
+import { applyCalorieAdjustment } from "@/lib/gym/fuel";
 
 export interface PlanEntryRow {
   id: string;
@@ -38,7 +39,9 @@ export async function loadPlanData(
       .order("title"),
     supabase
       .from("profiles")
-      .select("id, display_name, diet_type, allergies, targets_cache, role")
+      // `*` keeps the planner working if the gym migration (0017) has not
+      // been applied yet; the calorie offset then reads as 0.
+      .select("*")
       .eq("household_id", householdId),
   ]);
 
@@ -88,7 +91,10 @@ export async function loadPlanData(
       name: m.display_name,
       diet: m.diet_type,
       allergies: m.allergies ?? [],
-      targets: m.targets_cache!.targets as NutrientTargets,
+      targets: applyCalorieAdjustment(
+        m.targets_cache!.targets as NutrientTargets,
+        m.calorie_adjustment_kcal ?? 0,
+      ),
     }));
 
   return { plannerRecipes, itemsByRecipe, members, recipesById };

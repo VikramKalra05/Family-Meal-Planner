@@ -8,6 +8,8 @@ import { mondayOf } from "@/lib/planner";
 import { formatIstDate, istDateISO } from "@/lib/date";
 import { WeighInReminder } from "@/components/weigh-in-reminder";
 import { SubmitButton } from "@/components/submit-button";
+import { getGymToday } from "@/lib/gym/data";
+import { startSession } from "./gym/actions";
 import { IntakeDiary } from "./intake-diary";
 import { toIntakeItem } from "@/lib/intake";
 
@@ -31,6 +33,9 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
   const diaryDay =
     typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && d <= today ? d : today;
 
+  // Start the gym reads now so they overlap the household/plan queries.
+  const gymTodayPromise = getGymToday(profile, today);
+
   const [householdRes, todayLogRes, latestLogRes, logsRes] = await Promise.all([
     supabase.from("households").select("*").eq("id", profile.household_id!).single(),
     supabase.from("weight_logs").select("weight_kg").eq("member_id", profile.id).eq("logged_on", today).maybeSingle(),
@@ -52,6 +57,8 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
   );
 
   const targets = profile.targets_cache?.targets;
+  const gymToday = await gymTodayPromise;
+  const dayTargets = gymToday.fuel ?? targets;
 
   // This week's plan entries for today: mine + shared
   const { data: plan } = await supabase
@@ -104,6 +111,63 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
 
       <WeighInSection loggedToday={weighIn.loggedToday} time={profile.weigh_in_time} latest={weighIn.latestKg} />
 
+      <section
+        className={`rounded-none border-2 border-neutral-900 p-5 shadow-[4px_4px_0_#111] ${
+          gymToday.isTrainingDay ? "bg-violet-200" : "bg-white"
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-extrabold uppercase tracking-widest text-neutral-600">
+              {gymToday.isTrainingDay ? "🏋️ Training day" : "🛌 Rest day"}
+            </p>
+            <h2 className="mt-0.5 text-sm font-extrabold">
+              {gymToday.programDay?.name ??
+                (gymToday.isTrainingDay ? "Freestyle session" : "Recovery is part of the plan")}
+            </h2>
+            <p className="mt-0.5 text-xs text-neutral-600">
+              {gymToday.programDay
+                ? `${gymToday.programDay.exercises.length} exercises · carbs are shifted toward today`
+                : gymToday.gym
+                  ? "No session mapped for today — open your program to adjust the split"
+                  : "Set up your equipment to sync training with your meals"}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {gymToday.session?.status === "in_progress" ? (
+              <Link
+                href={`/gym/workout/${gymToday.session.id}`}
+                className="rounded-none border-2 border-neutral-900 bg-emerald-400 px-4 py-2 text-xs font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] nb-press"
+              >
+                Resume →
+              </Link>
+            ) : gymToday.session?.status === "completed" ? (
+              <span className="border-2 border-neutral-900 bg-emerald-300 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wide">
+                Done today ✓
+              </span>
+            ) : gymToday.programDay ? (
+              <form action={startSession}>
+                <input type="hidden" name="programDayId" value={gymToday.programDay.id} />
+                <input type="hidden" name="date" value={today} />
+                <SubmitButton
+                  pendingText="Starting…"
+                  className="rounded-none border-2 border-neutral-900 bg-emerald-400 px-4 py-2 text-xs font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] nb-press"
+                >
+                  Start →
+                </SubmitButton>
+              </form>
+            ) : (
+              <Link
+                href={gymToday.gym ? "/gym/plan" : "/gym/setup"}
+                className="rounded-none border-2 border-neutral-900 bg-white px-4 py-2 text-xs font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] nb-press"
+              >
+                {gymToday.gym ? "Open program" : "Set up gym"} →
+              </Link>
+            )}
+          </div>
+        </div>
+      </section>
+
       <section className="rounded-none border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0_#111]">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">
@@ -113,12 +177,12 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
             engine v{profile.targets_version} →
           </Link>
         </div>
-        {targets ? (
+        {dayTargets ? (
           <div className="grid gap-6 md:grid-cols-2">
             <div className="flex items-center gap-4">
-              <TargetRing kcal={targets.kcal} />
+              <TargetRing kcal={dayTargets.kcal} />
               <div className="text-sm text-neutral-600">
-                <p className="font-extrabold uppercase tracking-wide text-neutral-900">{targets.kcal} kcal / day</p>
+                <p className="font-extrabold uppercase tracking-wide text-neutral-900">{dayTargets.kcal} kcal / day</p>
                 <p className="mt-1 text-xs">
                   {profile.goal === "weight_loss"
                     ? "Weight loss plan"
@@ -126,6 +190,9 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
                       ? "Muscle gain plan"
                       : "Maintenance plan"}
                 </p>
+                {gymToday.fuel && gymToday.fuel.deltaKcal !== 0 && (
+                  <p className="mt-1 text-[11px] font-bold text-emerald-700">{gymToday.fuel.note}</p>
+                )}
                 {profile.budget_daily != null && profile.budget_daily > 0 && (
                   <p className="mt-1 text-xs">Budget: ₹{profile.budget_daily}/day</p>
                 )}
@@ -136,10 +203,10 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
             </div>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { label: "Protein", grams: targets.proteinG, cls: "bg-lime-200" },
-                { label: "Carbs", grams: targets.carbsG, cls: "bg-amber-200" },
-                { label: "Fat", grams: targets.fatG, cls: "bg-red-200" },
-                { label: "Fiber", grams: targets.fiberG, cls: "bg-violet-200" },
+                { label: "Protein", grams: dayTargets.proteinG, cls: "bg-lime-200" },
+                { label: "Carbs", grams: dayTargets.carbsG, cls: "bg-amber-200" },
+                { label: "Fat", grams: dayTargets.fatG, cls: "bg-red-200" },
+                { label: "Fiber", grams: dayTargets.fiberG, cls: "bg-violet-200" },
               ].map((m) => (
                 <div key={m.label} className={`border-2 border-neutral-900 p-2.5 shadow-[3px_3px_0_#111] ${m.cls}`}>
                   <p className="text-[10px] font-extrabold uppercase tracking-widest text-neutral-700">{m.label}</p>
@@ -153,7 +220,7 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
         )}
       </section>
 
-      <IntakeDiary key={diaryDay} date={diaryDay} today={today} items={intake} targets={targets ?? null} />
+      <IntakeDiary key={diaryDay} date={diaryDay} today={today} items={intake} targets={dayTargets ?? null} />
 
       <section className="space-y-3">
         <div className="flex items-center justify-between">

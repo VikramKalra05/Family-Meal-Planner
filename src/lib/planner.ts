@@ -40,10 +40,13 @@ export interface PlannerMember {
   diet: "veg" | "egg" | "non_veg";
   allergies: string[];
   targets: NutrientTargets;
+  /** Per-date targets when training-day carb cycling is active. */
+  targetsByDate?: Record<string, NutrientTargets>;
 }
 
-function slotTargetKcal(member: PlannerMember, slot: SlotKey): number {
-  return member.targets.kcal * SLOT_SPLIT[slot];
+function slotTargetKcal(member: PlannerMember, slot: SlotKey, date?: string): number {
+  const dayTargets = date ? member.targetsByDate?.[date] : undefined;
+  return (dayTargets ?? member.targets).kcal * SLOT_SPLIT[slot];
 }
 
 /**
@@ -111,8 +114,13 @@ export interface PortionFit {
 }
 
 /** How much of one serving this member should eat to hit the slot target. */
-export function fitFor(recipe: PlannerRecipe, member: PlannerMember, slot: SlotKey): PortionFit {
-  const target = slotTargetKcal(member, slot);
+export function fitFor(
+  recipe: PlannerRecipe,
+  member: PlannerMember,
+  slot: SlotKey,
+  date?: string,
+): PortionFit {
+  const target = slotTargetKcal(member, slot, date);
   const rawPortion = target / Math.max(1, recipe.kcal);
   const portion = Math.min(
     PORTION_MAX,
@@ -128,8 +136,13 @@ export function fitFor(recipe: PlannerRecipe, member: PlannerMember, slot: SlotK
   };
 }
 
-export function portionFor(recipe: PlannerRecipe, member: PlannerMember, slot: SlotKey): number {
-  return fitFor(recipe, member, slot).portion;
+export function portionFor(
+  recipe: PlannerRecipe,
+  member: PlannerMember,
+  slot: SlotKey,
+  date?: string,
+): number {
+  return fitFor(recipe, member, slot, date).portion;
 }
 
 /**
@@ -143,8 +156,9 @@ export function scoreCandidate(
   member: PlannerMember,
   slot: SlotKey,
   usedCount: number,
+  date?: string,
 ): ScoredCandidate {
-  const fit = fitFor(recipe, member, slot);
+  const fit = fitFor(recipe, member, slot, date);
   let score = 1;
   score += healthScore({
     kcal: recipe.kcal,
@@ -181,10 +195,11 @@ export function candidatesFor(
   slot: SlotKey,
   usedTitles: Set<string>,
   limit = 6,
+  date?: string,
 ): ScoredCandidate[] {
   return recipes
     .filter((r) => isRecipeSafeFor(r, member))
-    .map((r) => scoreCandidate(r, member, slot, usedTitles.has(r.title) ? 1 : 0))
+    .map((r) => scoreCandidate(r, member, slot, usedTitles.has(r.title) ? 1 : 0, date))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 }
@@ -193,15 +208,16 @@ export function candidatesFor(
  * Shared-dish diet rule: veg if ANY eater is veg/eggetarian, allergen
  * exclusions = union of all eaters' allergies.
  */
-export function sharedDiet(members: PlannerMember[]): PlannerMember {
+export function sharedDiet(members: PlannerMember[], date?: string): PlannerMember {
   const anyVeg = members.some((m) => m.diet !== "non_veg");
   const allergies = [...new Set(members.flatMap((m) => m.allergies))];
+  const t = (m: PlannerMember) => (date ? m.targetsByDate?.[date] : undefined) ?? m.targets;
   const avgTargets: NutrientTargets = {
-    kcal: members.reduce((s, m) => s + m.targets.kcal, 0) / Math.max(1, members.length),
-    proteinG: members.reduce((s, m) => s + m.targets.proteinG, 0) / Math.max(1, members.length),
-    carbsG: members.reduce((s, m) => s + m.targets.carbsG, 0) / Math.max(1, members.length),
-    fatG: members.reduce((s, m) => s + m.targets.fatG, 0) / Math.max(1, members.length),
-    fiberG: members.reduce((s, m) => s + m.targets.fiberG, 0) / Math.max(1, members.length),
+    kcal: members.reduce((s, m) => s + t(m).kcal, 0) / Math.max(1, members.length),
+    proteinG: members.reduce((s, m) => s + t(m).proteinG, 0) / Math.max(1, members.length),
+    carbsG: members.reduce((s, m) => s + t(m).carbsG, 0) / Math.max(1, members.length),
+    fatG: members.reduce((s, m) => s + t(m).fatG, 0) / Math.max(1, members.length),
+    fiberG: members.reduce((s, m) => s + t(m).fiberG, 0) / Math.max(1, members.length),
   };
   return {
     id: "shared",
@@ -224,10 +240,11 @@ function pickRanked(
   slot: SlotKey,
   usage: Map<string, number>,
   dayTitles: Set<string>,
+  date?: string,
 ): ScoredCandidate | null {
   const scored = pool
     .filter((r) => dietAllows(r, member.diet) && matchesAllergies(r, member.allergies))
-    .map((r) => scoreCandidate(r, member, slot, usage.get(r.title) ?? 0))
+    .map((r) => scoreCandidate(r, member, slot, usage.get(r.title) ?? 0, date))
     .sort((a, b) => b.score - a.score);
   const withinCap = scored.filter((c) => (usage.get(c.recipe.title) ?? 0) < 2);
   const fresh = withinCap.filter((c) => !dayTitles.has(c.recipe.title));
@@ -284,20 +301,20 @@ export function generateWeek(input: GenerateInput): PlannedEntry[] {
 
   if (recipes.length === 0 || members.length === 0) return entries;
 
-  const shared = sharedDiet(members);
   const start = Date.parse(input.weekStart);
 
   for (let d = 0; d < days; d++) {
     const date = new Date(start + d * 24 * 3600 * 1000).toISOString().slice(0, 10);
+    const shared = sharedDiet(members, date);
 
     // Shared family dinner
-    const dinnerPick = pickRanked(recipes, shared, "dinner", usage, new Set());
+    const dinnerPick = pickRanked(recipes, shared, "dinner", usage, new Set(), date);
     if (dinnerPick) {
       const pick = dinnerPick.recipe;
       const portions: Record<string, number> = {};
       let total = 0;
       for (const m of members) {
-        const p = portionFor(pick, m, "dinner");
+        const p = portionFor(pick, m, "dinner", date);
         portions[m.id] = p;
         total += p;
       }
@@ -316,7 +333,7 @@ export function generateWeek(input: GenerateInput): PlannedEntry[] {
     for (const member of members) {
       const dayTitles = new Set<string>();
       for (const slot of ["breakfast", "lunch", "snack"] as SlotKey[]) {
-        const pick = pickRanked(recipes, member, slot, usage, dayTitles);
+        const pick = pickRanked(recipes, member, slot, usage, dayTitles, date);
         if (!pick) continue;
         const dish = pick.recipe;
         const portion = pick.portion;

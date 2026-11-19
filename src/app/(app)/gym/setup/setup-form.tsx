@@ -1,0 +1,418 @@
+"use client";
+
+import { useActionState, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  EQUIPMENT_CATEGORY_LABELS,
+  FULL_GYM_IDS,
+  GYM_EQUIPMENT,
+  HOME_GYM_IDS,
+  type EquipmentCategory,
+} from "@/data/gym-equipment";
+import { PROGRAM_TEMPLATES } from "@/lib/gym/program";
+import {
+  KG_BARS,
+  KG_PLATE_PRESET,
+  LB_BARS,
+  LB_PLATE_PRESET,
+  WEEKDAY_LABELS,
+  type PlateDenom,
+  type WeightUnit,
+} from "@/lib/gym/types";
+import { presetPlates } from "@/lib/gym/plates";
+import { saveGymSetup } from "../actions";
+import { SubmitButton } from "@/components/submit-button";
+
+const PLATE_COLORS: Record<string, string> = {
+  red: "#ef4444",
+  blue: "#3b82f6",
+  yellow: "#fde047",
+  green: "#22c55e",
+  white: "#ffffff",
+  chrome: "#d4d4d4",
+};
+
+const input =
+  "rounded-none border-2 border-neutral-900 bg-white px-3 py-2 text-sm focus:shadow-[3px_3px_0_#111] focus:outline-none";
+const chip =
+  "rounded-none border-2 border-neutral-900 px-3 py-1.5 text-[11px] font-extrabold uppercase tracking-wide transition-all";
+
+export interface SetupInitial {
+  unit: WeightUnit;
+  barWeight: number;
+  equipmentIds: string[];
+  trainingDays: number[];
+  plates: PlateDenom[];
+  templateId: string;
+}
+
+export function SetupForm({ initial }: { initial: SetupInitial }) {
+  const [state, action] = useActionState(saveGymSetup, { error: null, ok: null });
+  const [unit, setUnit] = useState<WeightUnit>(initial.unit);
+  const [barWeight, setBarWeight] = useState(initial.barWeight);
+  const [equipmentIds, setEquipmentIds] = useState<string[]>(initial.equipmentIds);
+  const [trainingDays, setTrainingDays] = useState<number[]>(initial.trainingDays);
+  const [plates, setPlates] = useState<PlateDenom[]>(
+    initial.plates.length > 0 ? initial.plates : presetPlates(initial.unit),
+  );
+  const [templateId, setTemplateId] = useState(initial.templateId);
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<"all" | EquipmentCategory>("all");
+
+  const equipment = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return [...GYM_EQUIPMENT]
+      .filter((e) => (category === "all" ? true : e.category === category))
+      .filter((e) => (q ? `${e.name} ${e.hint ?? ""}`.toLowerCase().includes(q) : true))
+      .sort((a, b) => a.popularity - b.popularity);
+  }, [category, query]);
+
+  const selected = new Set(equipmentIds);
+  const toggle = (id: string) =>
+    setEquipmentIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const toggleDay = (day: number) =>
+    setTrainingDays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort()));
+
+  function changeUnit(next: WeightUnit) {
+    setUnit(next);
+    setBarWeight(next === "lb" ? 45 : 20);
+    setPlates(presetPlates(next));
+  }
+
+  function setCount(id: string, delta: number) {
+    setPlates((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, count: Math.max(0, Math.min(40, p.count + delta)) } : p)),
+    );
+  }
+
+  function addPlate() {
+    setPlates((prev) => [
+      ...prev,
+      { id: `custom-${Date.now()}`, label: "Plate", weight: 1.25, count: 2, color: "chrome" },
+    ]);
+  }
+
+  const bars = unit === "lb" ? LB_BARS : KG_BARS;
+
+  return (
+    <form action={action} className="space-y-5">
+      <input type="hidden" name="unit" value={unit} />
+      <input type="hidden" name="barWeight" value={barWeight} />
+      <input type="hidden" name="equipmentIds" value={JSON.stringify(equipmentIds)} />
+      <input type="hidden" name="trainingDays" value={JSON.stringify(trainingDays)} />
+      <input type="hidden" name="plates" value={JSON.stringify(plates)} />
+      <input type="hidden" name="templateId" value={templateId} />
+
+      {/* ── Equipment ─────────────────────────────────────────────────── */}
+      <section className="rounded-none border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0_#111]">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">
+              1. What does your gym have?
+            </h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              {equipmentIds.length} selected. Tick the machines you recognise — the photos are a guide,
+              names vary by gym.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => setEquipmentIds(FULL_GYM_IDS)} className={`${chip} bg-white nb-press`}>
+              Full gym
+            </button>
+            <button type="button" onClick={() => setEquipmentIds(HOME_GYM_IDS)} className={`${chip} bg-white nb-press`}>
+              Home
+            </button>
+            <button type="button" onClick={() => setEquipmentIds([])} className={`${chip} bg-white nb-press`}>
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search chest press, cables, leg curl…"
+            className={`${input} min-w-56 flex-1`}
+            aria-label="Search equipment"
+          />
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value as "all" | EquipmentCategory)}
+            className={input}
+            aria-label="Equipment category"
+          >
+            <option value="all">All categories</option>
+            {Object.entries(EQUIPMENT_CATEGORY_LABELS).map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
+          {equipment.map((e) => {
+            const on = selected.has(e.id);
+            return (
+              <button
+                key={e.id}
+                type="button"
+                aria-pressed={on}
+                onClick={() => toggle(e.id)}
+                className={`relative overflow-hidden border-2 border-neutral-900 text-left transition-all ${
+                  on
+                    ? "bg-emerald-300 shadow-none"
+                    : "bg-white shadow-[2px_2px_0_#111] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+                }`}
+              >
+                <div className="aspect-[4/3] overflow-hidden border-b-2 border-neutral-900 bg-neutral-100">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={e.image ?? "/gym-equipment/placeholder.svg"}
+                    alt={e.name}
+                    loading="lazy"
+                    className="h-full w-full object-cover"
+                    onError={(event) => {
+                      event.currentTarget.src = "/gym-equipment/placeholder.svg";
+                    }}
+                  />
+                </div>
+                <div className="p-2">
+                  <p className="text-xs font-extrabold leading-tight">{e.name}</p>
+                  {e.hint && <p className="mt-0.5 line-clamp-2 text-[10px] leading-tight text-neutral-500">{e.hint}</p>}
+                </div>
+                {on && (
+                  <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center border-2 border-neutral-900 bg-yellow-300 text-[10px] font-extrabold">
+                    ✓
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        {equipment.length === 0 && (
+          <p className="mt-4 border-2 border-dashed border-neutral-300 p-4 text-center text-xs text-neutral-400">
+            No equipment matches that search. Clear the search or add a custom exercise later.
+          </p>
+        )}
+      </section>
+
+      {/* ── Training days ─────────────────────────────────────────────── */}
+      <section className="rounded-none border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0_#111]">
+        <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">2. Training days</h2>
+        <p className="mt-1 text-xs text-neutral-500">
+          Rest days are part of the plan. Your calories shift carbs toward these days and away from the rest.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {WEEKDAY_LABELS.map((label, index) => {
+            const on = trainingDays.includes(index);
+            return (
+              <button
+                key={label}
+                type="button"
+                aria-pressed={on}
+                onClick={() => toggleDay(index)}
+                className={`h-12 w-14 border-2 border-neutral-900 text-xs font-extrabold uppercase transition-all ${
+                  on ? "bg-emerald-400 shadow-[2px_2px_0_#111]" : "bg-white text-neutral-400"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-[11px] text-neutral-400">
+          {trainingDays.length === 0
+            ? "Pick at least one day."
+            : `${trainingDays.length} training days · ${7 - trainingDays.length} rest days`}
+        </p>
+      </section>
+
+      {/* ── Bar & plates ──────────────────────────────────────────────── */}
+      <section className="rounded-none border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0_#111]">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">3. Bar & plates</h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              Set the plate colours once. The calculator will tell you what to load — and what the bar weighs.
+            </p>
+          </div>
+          <div className="flex gap-1">
+            {(["kg", "lb"] as const).map((u) => (
+              <button
+                key={u}
+                type="button"
+                onClick={() => changeUnit(u)}
+                className={`${chip} ${unit === u ? "bg-yellow-300" : "bg-white"}`}
+              >
+                {u}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="text-xs font-bold text-neutral-600">
+            Bar weight ({unit})
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.5"
+              value={barWeight}
+              onChange={(e) => setBarWeight(Number(e.target.value))}
+              className={`${input} mt-1 w-full`}
+            />
+            <span className="mt-1 block text-[10px] font-normal text-neutral-400">
+              {bars.map((b) => b.label).join(" · ")}
+            </span>
+          </label>
+          <div className="flex items-end gap-1.5">
+            {bars.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => setBarWeight(b.weight)}
+                className={`${chip} ${barWeight === b.weight ? "bg-lime-200" : "bg-white"}`}
+              >
+                {b.weight}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-2">
+          {plates.map((p) => (
+            <div key={p.id} className="flex flex-wrap items-center gap-2 border-2 border-neutral-900 bg-amber-50 p-2">
+              <span
+                className="h-7 w-7 shrink-0 border-2 border-neutral-900"
+                style={{ background: PLATE_COLORS[p.color ?? "chrome"] ?? "#d4d4d4" }}
+                aria-hidden
+              />
+              <input
+                value={p.label}
+                onChange={(e) =>
+                  setPlates((prev) => prev.map((x) => (x.id === p.id ? { ...x, label: e.target.value } : x)))
+                }
+                className={`${input} w-20`}
+                aria-label="Plate label"
+              />
+              <input
+                type="number"
+                min="0"
+                step="0.25"
+                value={p.weight}
+                onChange={(e) =>
+                  setPlates((prev) =>
+                    prev.map((x) => (x.id === p.id ? { ...x, weight: Number(e.target.value) } : x)),
+                  )
+                }
+                className={`${input} w-24`}
+                aria-label="Plate weight"
+              />
+              <span className="text-[10px] font-extrabold uppercase text-neutral-400">×</span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setCount(p.id, -1)}
+                  className="h-8 w-8 border-2 border-neutral-900 bg-white text-sm font-extrabold"
+                  aria-label={`Remove one ${p.label}`}
+                >
+                  −
+                </button>
+                <span className="w-8 text-center text-sm font-extrabold">{p.count}</span>
+                <button
+                  type="button"
+                  onClick={() => setCount(p.id, 1)}
+                  className="h-8 w-8 border-2 border-neutral-900 bg-white text-sm font-extrabold"
+                  aria-label={`Add one ${p.label}`}
+                >
+                  +
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPlates((prev) => prev.filter((x) => x.id !== p.id))}
+                className="ml-auto text-[10px] font-extrabold uppercase text-neutral-400 hover:text-red-600"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-[10px] text-neutral-400">
+          Count is the total number of that plate in the gym, both sides. The calculator puts half on each side.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" onClick={addPlate} className={`${chip} bg-white nb-press`}>
+            + Add a plate
+          </button>
+          <button
+            type="button"
+            onClick={() => setPlates(presetPlates(unit))}
+            className={`${chip} bg-white nb-press`}
+          >
+            Reset to standard {(unit === "lb" ? LB_PLATE_PRESET : KG_PLATE_PRESET).length} plates
+          </button>
+        </div>
+      </section>
+
+      {/* ── Program ───────────────────────────────────────────────────── */}
+      <section className="rounded-none border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0_#111]">
+        <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">4. Pick a split</h2>
+        <p className="mt-1 text-xs text-neutral-500">
+          You can change this later. Exercises your equipment can&apos;t support are dropped automatically.
+        </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {PROGRAM_TEMPLATES.map((t) => {
+            const on = templateId === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTemplateId(t.id)}
+                aria-pressed={on}
+                className={`border-2 border-neutral-900 p-3 text-left transition-all ${
+                  on ? "bg-yellow-300 shadow-none" : "bg-white shadow-[2px_2px_0_#111] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+                }`}
+              >
+                <p className="text-sm font-extrabold">{t.name}</p>
+                <p className="mt-0.5 text-[11px] text-neutral-600">{t.description}</p>
+                <p className="mt-1 text-[10px] font-extrabold uppercase tracking-wide text-neutral-400">
+                  {t.days.map((d) => d.name).join(" · ")}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {state.error && (
+        <p className="border-2 border-neutral-900 bg-red-200 px-4 py-3 text-sm font-bold shadow-[2px_2px_0_#111]">
+          {state.error}
+        </p>
+      )}
+      {state.ok && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-2 border-neutral-900 bg-emerald-300 px-4 py-3 text-sm font-bold shadow-[2px_2px_0_#111]">
+          <span>{state.ok}</span>
+          <Link href="/gym" className="underline">
+            Go to Gym →
+          </Link>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <SubmitButton
+          pendingText="Building your program…"
+          className="rounded-none border-2 border-neutral-900 bg-emerald-400 px-6 py-3 text-sm font-extrabold uppercase tracking-wide shadow-[3px_3px_0_#111] nb-press"
+        >
+          Save & build my program
+        </SubmitButton>
+        <span className="text-[11px] text-neutral-400">
+          {equipmentIds.length} equipment · {trainingDays.length} days · {plates.length} plate types
+        </span>
+      </div>
+    </form>
+  );
+}
