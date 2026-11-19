@@ -250,7 +250,7 @@ export function WeightChart({
               />
 
               {/* Hover crosshair */}
-              {hover != null && geom && (
+              {hover != null && hover < geom.xs.length && (
                 <line
                   x1={geom.xs[hover]}
                   x2={geom.xs[hover]}
