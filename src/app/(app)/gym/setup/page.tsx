@@ -10,7 +10,7 @@ export default async function GymSetupPage() {
   const [gym, program] = await Promise.all([getGym(profile.id), getActiveProgram(profile.id)]);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <div className="space-y-5">
       <div>
         <Link href="/gym" className="text-xs font-extrabold uppercase tracking-wide text-neutral-400 hover:text-neutral-900">
           ← Gym

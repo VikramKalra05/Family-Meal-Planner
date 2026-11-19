@@ -36,7 +36,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
             </SubmitButton>
           </form>
         </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 p-4 md:p-6">{children}</main>
+        <main className="w-full min-w-0 flex-1 p-4 md:p-6">{children}</main>
       </div>
       {/* Rasoi AI dock slot: the assistant portals its panel here when open, so
           on desktop it becomes a real flex sibling — the page column resizes
