@@ -35,11 +35,11 @@ const microLabel = "mb-0.5 block text-[9px] font-extrabold uppercase tracking-wi
 const smallBtn =
   "rounded-none border-2 border-neutral-900 bg-white px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:opacity-40 disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[2px_2px_0_#111]";
 
-const MACROS: { key: MacroKey; label: string; short: string; chip: string; text: string }[] = [
-  { key: "protein", label: "Protein", short: "P", chip: "bg-lime-200", text: "text-lime-800" },
-  { key: "carbs", label: "Carbs", short: "C", chip: "bg-amber-200", text: "text-amber-800" },
-  { key: "fat", label: "Fat", short: "F", chip: "bg-red-200", text: "text-red-800" },
-  { key: "fiber", label: "Fiber", short: "Fb", chip: "bg-violet-200", text: "text-violet-800" },
+const MACROS: { key: MacroKey; label: string; short: string; chip: string; bar: string; text: string }[] = [
+  { key: "protein", label: "Protein", short: "P", chip: "bg-lime-200", bar: "bg-lime-500", text: "text-lime-800" },
+  { key: "carbs", label: "Carbs", short: "C", chip: "bg-amber-200", bar: "bg-amber-500", text: "text-amber-800" },
+  { key: "fat", label: "Fat", short: "F", chip: "bg-red-200", bar: "bg-red-500", text: "text-red-800" },
+  { key: "fiber", label: "Fiber", short: "Fb", chip: "bg-violet-200", bar: "bg-violet-500", text: "text-violet-800" },
 ];
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -125,12 +125,12 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
       {/* Day totals */}
       <div className="space-y-3 px-5 py-4">
         <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
-          <p className="text-2xl font-extrabold leading-none text-neutral-900">
+          <p className="text-2xl font-extrabold leading-none tabular-nums text-neutral-900">
             {Math.round(day.kcal)}
             <span className="text-sm font-bold text-neutral-400"> / {t ? Math.round(t.kcal) : "—"} kcal</span>
           </p>
           {left != null && (
-            <p className={`text-xs font-extrabold uppercase tracking-wide ${left < 0 ? "text-red-600" : "text-emerald-700"}`}>
+            <p className={`text-xs font-extrabold uppercase tracking-wide tabular-nums ${left < 0 ? "text-red-600" : "text-emerald-700"}`}>
               {left >= 0 ? `${left} kcal left` : `${Math.abs(left)} kcal over`}
             </p>
           )}
@@ -147,8 +147,8 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
             const target = t?.[m.key] ?? null;
             return (
               <div key={m.key} className={`border-2 border-neutral-900 px-2.5 py-1.5 shadow-[2px_2px_0_#111] ${m.chip}`}>
-                <p className={`text-[9px] font-extrabold uppercase tracking-widest ${m.text}`}>{m.label}</p>
-                <p className="text-sm font-extrabold text-neutral-900">
+                <p className={`text-[10px] font-extrabold uppercase tracking-widest ${m.text}`}>{m.label}</p>
+                <p className="text-base font-extrabold tabular-nums text-neutral-900">
                   {r1(value)}
                   <span className="text-[10px] font-bold text-neutral-600"> / {target == null ? "—" : r1(target)} g</span>
                 </p>
@@ -167,7 +167,7 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
           type="button"
           onClick={() => setView("meal")}
           aria-pressed={view === "meal"}
-          className={`flex-1 px-3 py-2 text-[10px] font-extrabold uppercase tracking-widest transition-colors sm:flex-none sm:px-5 ${
+          className={`flex-1 px-3 py-2 text-[11px] font-extrabold uppercase tracking-widest transition-colors sm:flex-none sm:px-5 ${
             view === "meal" ? "bg-neutral-900 text-white" : "bg-white text-neutral-500 hover:bg-amber-50"
           }`}
         >
@@ -177,7 +177,7 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
           type="button"
           onClick={() => setView("macro")}
           aria-pressed={view === "macro"}
-          className={`flex-1 px-3 py-2 text-[10px] font-extrabold uppercase tracking-widest transition-colors sm:flex-none sm:px-5 ${
+          className={`flex-1 px-3 py-2 text-[11px] font-extrabold uppercase tracking-widest transition-colors sm:flex-none sm:px-5 ${
             view === "macro" ? "bg-neutral-900 text-white" : "bg-white text-neutral-500 hover:bg-amber-50"
           }`}
         >
@@ -191,10 +191,10 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
           {groups.map((group) => (
             <div key={group.slot} className="border-b-2 border-neutral-900 last:border-b-0">
               <div className="flex items-center justify-between gap-2 bg-neutral-50 px-5 py-1.5">
-                <p className="text-[10px] font-extrabold uppercase tracking-widest text-neutral-500">
+                <p className="text-[11px] font-extrabold uppercase tracking-widest text-neutral-500">
                   {SLOT_LABEL[group.slot]}
                   {group.items.length > 0 && (
-                    <span className="ml-1.5 font-bold text-neutral-400">· {Math.round(group.totals.kcal)} kcal</span>
+                    <span className="ml-1.5 font-bold tabular-nums text-neutral-400">· {Math.round(group.totals.kcal)} kcal</span>
                   )}
                 </p>
                 <button
@@ -221,7 +221,7 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
               )}
 
               {group.items.length === 0 && adding !== group.slot && (
-                <p className="px-5 py-2.5 text-[11px] font-medium text-neutral-400">Nothing logged in this meal.</p>
+                <p className="px-5 py-2.5 text-xs font-medium text-neutral-400">Nothing logged in this meal.</p>
               )}
 
               {group.items.map((item) =>
@@ -244,7 +244,7 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
                           {SOURCE_LABEL[item.source] ?? item.source}
                         </span>
                       </p>
-                      <p className="mt-0.5 text-[11px] font-semibold text-neutral-500">
+                      <p className="mt-0.5 text-[12px] font-semibold tabular-nums text-neutral-500">
                         <span className="text-emerald-700">P</span> {r1(item.protein_g)}g
                         <span className="text-neutral-300"> · </span>
                         <span className="text-amber-700">C</span> {r1(item.carbs_g)}g
@@ -259,7 +259,7 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
-                      <span className="text-sm font-extrabold text-neutral-900">
+                      <span className="text-sm font-extrabold tabular-nums text-neutral-900">
                         {Math.round(item.kcal)}
                         <span className="ml-0.5 text-[9px] font-bold uppercase text-neutral-400">kcal</span>
                       </span>
@@ -294,37 +294,74 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
           ))}
         </div>
       ) : (
-        <div className="divide-y-2 divide-neutral-900">
+        <div className="grid gap-3 bg-white p-4 lg:grid-cols-2">
+          <p className="col-span-full text-[11px] font-semibold text-neutral-500">
+            Where each macro came from — the small bar is that food&apos;s share of the macro you&apos;ve logged.
+          </p>
           {MACROS.map((m) => {
             const value = day[m.key];
             const target = t?.[m.key] ?? null;
+            const targetPct = target != null && target > 0 ? Math.round((value / target) * 100) : 0;
+            const barPct = Math.min(100, targetPct);
             const contributions = macroContributions(items, m.key, 3);
             return (
-              <div key={m.key} className="px-5 py-3">
-                <div className="flex items-baseline justify-between gap-2">
-                  <p className="text-[10px] font-extrabold uppercase tracking-widest text-neutral-500">{m.label}</p>
-                  <p className="text-sm font-extrabold text-neutral-900">
+              <div
+                key={m.key}
+                className="flex flex-col border-2 border-neutral-900 bg-white shadow-[3px_3px_0_#111]"
+              >
+                <div
+                  className={`flex items-center justify-between gap-2 border-b-2 border-neutral-900 px-3.5 py-2 ${m.chip}`}
+                >
+                  <p className={`text-[11px] font-extrabold uppercase tracking-widest ${m.text}`}>{m.label}</p>
+                  <p className="text-base font-extrabold tabular-nums text-neutral-900">
                     {r1(value)}
-                    <span className="text-[11px] font-bold text-neutral-400"> / {target == null ? "—" : r1(target)} g</span>
+                    <span className="text-[11px] font-bold text-neutral-600">
+                      {" "}
+                      / {target == null ? "—" : r1(target)} g
+                    </span>
                   </p>
                 </div>
-                <div className="mt-1 h-2 w-full border-2 border-neutral-900 bg-white">
-                  <div className={`h-full ${m.chip}`} style={{ width: `${pctOf(value, target)}%` }} />
-                </div>
-                {contributions.length === 0 ? (
-                  <p className="mt-1.5 text-[11px] text-neutral-400">Nothing logged for this macro.</p>
-                ) : (
-                  <ul className="mt-1.5 space-y-0.5">
-                    {contributions.map((c) => (
-                      <li key={c.description} className="flex items-baseline justify-between gap-2 text-[11px]">
-                        <span className="truncate font-semibold text-neutral-700">{c.description}</span>
-                        <span className="shrink-0 font-bold text-neutral-500">
-                          {c.value} g <span className="font-medium text-neutral-400">({c.pct}%)</span>
+
+                <div className="flex flex-1 flex-col gap-3 px-3.5 py-3">
+                  <div>
+                    <div className="h-3 w-full border-2 border-neutral-900 bg-white">
+                      <div className={`h-full ${m.bar}`} style={{ width: `${barPct}%` }} />
+                    </div>
+                    <div className="mt-1 flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                      <span>{targetPct}% of daily target</span>
+                      {target != null && (
+                        <span className={`tabular-nums ${value > target ? "text-red-600" : ""}`}>
+                          {value > target
+                            ? `${r1(value - target)} g over`
+                            : `${r1(target - value)} g left`}
                         </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                      )}
+                    </div>
+                  </div>
+
+                  {contributions.length === 0 ? (
+                    <p className="text-xs text-neutral-400">Nothing logged for this macro.</p>
+                  ) : (
+                    <ul className="space-y-2.5">
+                      {contributions.map((c) => (
+                        <li key={c.description}>
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="truncate text-[13px] font-semibold text-neutral-800">
+                              {c.description}
+                            </span>
+                            <span className="shrink-0 text-[12px] font-bold tabular-nums text-neutral-700">
+                              {c.value} g
+                              <span className="ml-1 font-semibold text-neutral-400">· {c.pct}%</span>
+                            </span>
+                          </div>
+                          <div className="mt-1 h-1.5 w-full bg-neutral-100">
+                            <div className={`h-full ${m.bar}`} style={{ width: `${c.pct}%` }} />
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -446,14 +483,14 @@ function ClearDay({ date, className = "" }: { date: string; className?: string }
           <button
             type="submit"
             disabled={pending}
-            className="rounded-none border-2 border-neutral-900 bg-red-300 px-2 py-1 text-[9px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] hover:bg-red-400 disabled:opacity-50"
+            className="rounded-none border-2 border-neutral-900 bg-red-300 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] hover:bg-red-400 disabled:opacity-50"
           >
             {pending ? "◌ Clearing…" : "Yes, clear day"}
           </button>
           <button
             type="button"
             onClick={() => setArmed(false)}
-            className="text-[9px] font-extrabold uppercase tracking-wide text-neutral-400 hover:text-neutral-900"
+            className="text-[10px] font-extrabold uppercase tracking-wide text-neutral-400 hover:text-neutral-900"
           >
             Cancel
           </button>
@@ -462,7 +499,7 @@ function ClearDay({ date, className = "" }: { date: string; className?: string }
         <button
           type="button"
           onClick={() => setArmed(true)}
-          className="text-[9px] font-extrabold uppercase tracking-wide text-neutral-400 hover:text-red-600"
+          className="text-[10px] font-extrabold uppercase tracking-wide text-neutral-400 hover:text-red-600"
         >
           Clear day
         </button>
