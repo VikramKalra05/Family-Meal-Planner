@@ -70,6 +70,8 @@ interface PanelMessage {
   key: string;
   role: "user" | "assistant" | "system";
   content: string;
+  /** Local preview of a photo attached to this turn (never persisted). */
+  image?: string;
   tools?: string[];
   proposal?: Proposal | null;
   /** For mutation proposals: where the confirm flow stands. */
@@ -78,7 +80,10 @@ interface PanelMessage {
   modelVia?: string;
 }
 
-type Busy = { kind: "thinking" } | { kind: "confirming"; messageKey: string } | null;
+type Busy =
+  | { kind: "thinking"; photo?: boolean }
+  | { kind: "confirming"; messageKey: string }
+  | null;
 
 /** "providerId|model" → { provider_id, model } for the API payloads. */
 function splitModelKey(key: string): { provider_id?: string; model?: string } {
@@ -90,6 +95,29 @@ function splitModelKey(key: string): { provider_id?: string; model?: string } {
     ...(provider_id ? { provider_id } : {}),
     ...(model ? { model } : {}),
   };
+}
+
+/**
+ * Downscales a camera/gallery photo to a JPEG data URL that fits comfortably
+ * inside the request limit (and keeps vision-model costs sane).
+ */
+async function compressMealPhoto(file: File): Promise<string> {
+  if (file.type && !file.type.startsWith("image/")) throw new Error("not-image");
+  const bitmap = await createImageBitmap(file);
+  const maxDim = 1280;
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas");
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+
+  let dataUrl = canvas.toDataURL("image/jpeg", 0.78);
+  if (dataUrl.length > 3_800_000) dataUrl = canvas.toDataURL("image/jpeg", 0.6);
+  if (dataUrl.length > 4_000_000) throw new Error("too-large");
+  return dataUrl;
 }
 
 const SUGGESTIONS = [
@@ -150,6 +178,13 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  /** Attached meal photo, compressed in the browser before sending. */
+  const [photo, setPhoto] = useState<{ dataUrl: string; name: string } | null>(null);
+  const [photoMenu, setPhotoMenu] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
+  const photoBoxRef = useRef<HTMLDivElement>(null);
   const [, startSend] = useTransition();
   const bottomRef = useRef<HTMLDivElement>(null);
   /** Aborts the in-flight turn (Stop button). */
@@ -197,6 +232,16 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, []);
+
+  // Photo menu: close when clicking elsewhere in the composer/page.
+  useEffect(() => {
+    if (!photoMenu) return;
+    function onDown(e: MouseEvent) {
+      if (photoBoxRef.current && !photoBoxRef.current.contains(e.target as Node)) setPhotoMenu(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [photoMenu]);
 
   // Keep the newest message in view.
   useEffect(() => {
@@ -285,13 +330,41 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-once loader; ☰ Chats re-runs it explicitly
   }, []);
 
-  function send(text: string) {
+  /** Picks a camera/gallery file, compresses it, and shows a preview. */
+  async function onPhotoPicked(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setError(null);
+    setPhotoBusy(true);
+    try {
+      const dataUrl = await compressMealPhoto(file);
+      setPhoto({ dataUrl, name: file.name || "Meal photo" });
+      setPhotoMenu(false);
+    } catch (e) {
+      setError(
+        (e as Error).message === "too-large"
+          ? "That photo is too large even after compression — try a smaller one."
+          : "Could not read that photo — try a JPEG/PNG, or take a new one.",
+      );
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  function send(text: string, image?: string) {
     const trimmed = text.trim();
-    if (!trimmed || busy) return;
+    if ((!trimmed && !image) || busy) return;
+    const userText = trimmed || "Log this meal";
     setError(null);
     setInput("");
-    setMessages((prev) => [...prev, { key: `u${Date.now()}`, role: "user", content: trimmed }]);
-    setBusy({ kind: "thinking" });
+    setPhoto(null);
+    setPhotoMenu(false);
+    setMessages((prev) => [
+      ...prev,
+      { key: `u${Date.now()}`, role: "user", content: userText, image },
+    ]);
+    setBusy({ kind: "thinking", photo: Boolean(image) });
     const ac = new AbortController();
     stopRef.current = ac;
     startSend(async () => {
@@ -300,7 +373,8 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            message: trimmed,
+            message: userText,
+            ...(image ? { image } : {}),
             ...splitModelKey(selectedModelKey),
             ...(conversationId ? { conversation_id: conversationId } : {}),
             page: pathname,
@@ -321,7 +395,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           const newId = data.conversationId;
           setConversationId(newId);
           setConversations((prev) =>
-            prev.some((c) => c.id === newId) ? prev : [{ id: newId, title: trimmed.slice(0, 48), created_at: new Date().toISOString() }, ...prev],
+            prev.some((c) => c.id === newId) ? prev : [{ id: newId, title: userText.slice(0, 48), created_at: new Date().toISOString() }, ...prev],
           );
         }
         if (data.stopped) {
@@ -625,7 +699,8 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
               <div className="border-2 border-neutral-900 bg-lime-200 p-3 text-xs font-medium text-neutral-900 shadow-[2px_2px_0_#111]">
                 Namaste! I can answer anything about your plans, meals, pantry, weight and family — and I can{" "}
                 <strong>do</strong> things for you (log meals, fix the food diary, clear a bad day, add recipes,
-                regenerate the week…) after you confirm each change.
+                regenerate the week…) after you confirm each change. Tap <strong>📷</strong> to log a meal from a
+                photo: I&apos;ll estimate weight, ingredients and macros, then ask before saving.
               </div>
               {Object.keys(memberMap).length > 0 && (
                 <div className="border-2 border-neutral-900 bg-white p-2.5 text-[10px] text-neutral-600 shadow-[2px_2px_0_#111]">
@@ -677,6 +752,15 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
               )}
               {m.role === "user" && (
                 <div className="ml-6 border-2 border-neutral-900 bg-yellow-300 px-3 py-2 text-xs font-medium text-neutral-900 shadow-[2px_2px_0_#111]">
+                  {m.image && (
+                    // Local preview only — the base64 photo is never stored.
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={m.image}
+                      alt="Meal attached to this message"
+                      className="mb-2 max-h-44 w-full border-2 border-neutral-900 object-cover"
+                    />
+                  )}
                   {m.content}
                 </div>
               )}
@@ -739,7 +823,15 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
 
           {busy?.kind === "thinking" && (
             <div className="space-y-2">
-              <AiWorking compact label="Thinking through your kitchen…" hint="Reading your plan, pantry and progress as needed." />
+              <AiWorking
+                compact
+                label={busy.photo ? "Reading your plate…" : "Thinking through your kitchen…"}
+                hint={
+                  busy.photo
+                    ? "Estimating the portion, weight, calories and macros — I'll ask before logging."
+                    : "Reading your plan, pantry and progress as needed."
+                }
+              />
               <div className="flex justify-center">
                 <button
                   type="button"
@@ -764,35 +856,117 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
           className="border-t-2 border-neutral-900 bg-white p-3"
           onSubmit={(e) => {
             e.preventDefault();
-            send(input);
+            send(input, photo?.dataUrl);
           }}
         >
+          {photo && (
+            <div className="mb-2 flex items-center gap-2 border-2 border-neutral-900 bg-amber-50 p-1.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={photo.dataUrl}
+                alt="Meal to analyse"
+                className="h-12 w-12 border-2 border-neutral-900 object-cover"
+              />
+              <p className="min-w-0 flex-1 truncate text-[10px] font-bold text-neutral-600">{photo.name}</p>
+              <button
+                type="button"
+                onClick={() => setPhoto(null)}
+                aria-label="Remove photo"
+                className="border-2 border-neutral-900 bg-white px-1.5 text-[10px] font-extrabold leading-5 shadow-[2px_2px_0_#111] hover:bg-red-100"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           <div className="flex items-end gap-2">
+            <div ref={photoBoxRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setPhotoMenu((v) => !v)}
+                disabled={busy !== null || provider === null || photoBusy}
+                aria-label="Attach a meal photo"
+                aria-expanded={photoMenu}
+                title="Log a meal from a photo"
+                className={`rounded-none border-2 border-neutral-900 px-2.5 py-2.5 text-sm shadow-[2px_2px_0_#111] transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:opacity-50 ${
+                  photoMenu ? "bg-yellow-300" : "bg-white"
+                }`}
+              >
+                {photoBusy ? "◌" : "📷"}
+              </button>
+
+              {photoMenu && (
+                <div className="absolute bottom-full left-0 z-30 mb-2 w-60 border-2 border-neutral-900 bg-white shadow-[5px_5px_0_#111]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhotoMenu(false);
+                      cameraRef.current?.click();
+                    }}
+                    className="block w-full border-b-2 border-neutral-900 px-3 py-2.5 text-left text-xs font-extrabold text-neutral-800 hover:bg-yellow-100"
+                  >
+                    📸 Take a photo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhotoMenu(false);
+                      galleryRef.current?.click();
+                    }}
+                    className="block w-full px-3 py-2.5 text-left text-xs font-extrabold text-neutral-800 hover:bg-yellow-100"
+                  >
+                    🖼 Choose from gallery
+                  </button>
+                  <p className="border-t-2 border-neutral-900 bg-neutral-50 px-3 py-1.5 text-[9px] leading-snug text-neutral-500">
+                    Needs a vision-capable model. I&apos;ll estimate weight, ingredients and macros, then ask
+                    before logging.
+                  </p>
+                </div>
+              )}
+            </div>
+
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  send(input);
+                  send(input, photo?.dataUrl);
                 }
               }}
               rows={2}
-              placeholder="Ask anything, or say what to do…"
+              placeholder={photo ? "Add a note (optional) — e.g. “only the dal”" : "Ask anything, or say what to do…"}
               disabled={busy !== null || provider === null}
               className="flex-1 resize-none rounded-none border-2 border-neutral-900 bg-white px-3 py-2 text-xs transition focus:shadow-[3px_3px_0_#111] focus:outline-none disabled:bg-neutral-100"
             />
             <button
               type="submit"
-              disabled={busy !== null || !input.trim() || provider === null}
+              disabled={busy !== null || (!input.trim() && !photo) || provider === null}
               aria-label="Send"
               className="rounded-none border-2 border-neutral-900 bg-emerald-400 px-3 py-2.5 text-sm font-extrabold shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none disabled:opacity-50"
             >
               ↑
             </button>
           </div>
+
+          <input
+            ref={cameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={onPhotoPicked}
+          />
+          <input
+            ref={galleryRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={onPhotoPicked}
+          />
+
           <p className="mt-1 text-[9px] text-neutral-400">
-            Enter to send · Shift+Enter for a new line · every change asks first
+            Enter to send · Shift+Enter for a new line · 📷 photo → I estimate, you confirm, then I log
           </p>
         </form>
         </>

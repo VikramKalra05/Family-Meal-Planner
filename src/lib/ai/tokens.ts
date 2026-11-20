@@ -16,7 +16,16 @@ export interface TokenUsage {
 }
 
 export interface UsageMessage {
-  content: string;
+  /** Text, or multimodal parts; base64 image data is not counted as text. */
+  content: string | Array<{ type?: string; text?: string; [key: string]: unknown }>;
+}
+
+/** Text-only view of a message for the fallback token estimate. */
+function usageText(content: UsageMessage["content"]): string {
+  if (typeof content === "string") return content;
+  return content
+    .map((part) => (part.type === "text" || part.text ? part.text ?? "" : ""))
+    .join("");
 }
 
 function asFiniteNumber(value: unknown): number | null {
@@ -62,7 +71,7 @@ export function normalizeUsage(
 
   // If the provider gave no token counts at all, estimate and mark it.
   if (promptRaw == null && completionRaw == null) {
-    const prompt = messages.reduce((sum, m) => sum + approxTokens(m.content), 0);
+    const prompt = messages.reduce((sum, m) => sum + approxTokens(usageText(m.content)), 0);
     const completionTokens = approxTokens(completion);
     return {
       promptTokens: prompt,

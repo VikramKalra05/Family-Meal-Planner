@@ -43,6 +43,7 @@ Respond with ONLY a JSON object: {"reply": string, "actions"?: Action[]} where A
 
 ## Mutation actions (the app STOPS and asks the user to confirm — never say you already did it; say "I can…" / "Want me to…")
 - {"action":"log_meal","text": "what was eaten","slot"?: slot} — e.g. "2 roti and a katori dal"
+- {"action":"log_meal_items","items":[{"description","grams","kcal","protein_g","carbs_g","fat_g","fiber_g"}],"slot"?,"date"?} — PHOTO PATH ONLY; the vision analyzer fills it. Text turns must use log_meal.
 - {"action":"log_weight","weight_kg": number} — today's weigh-in (targets recalculate)
 - {"action":"add_intake_item","description","kcal","protein_g"?,"carbs_g"?,"fat_g"?,"fiber_g"?,"slot"?,"date"?} — add one manually estimated item to a day
 - {"action":"update_intake_item","item_id", "description"?,"kcal"?,"protein_g"?,"carbs_g"?,"fat_g"?,"fiber_g"?,"slot"?,"date"?} — fix a logged item (get item_id from query_today / query_intake_day)

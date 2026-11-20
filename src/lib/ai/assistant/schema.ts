@@ -109,6 +109,31 @@ const logMeal = z.object({
   slot: slotEnum.optional(),
 });
 
+/**
+ * Structured items produced by the vision photo analyzer. Kept as a normal
+ * mutation so the confirmation card and /act re-validation apply unchanged.
+ */
+const logMealItems = z.object({
+  action: z.literal("log_meal_items"),
+  items: z
+    .array(
+      z.object({
+        description: z.string().trim().min(1).max(120),
+        grams: z.coerce.number().min(1).max(3000).optional(),
+        kcal: z.coerce.number().min(0).max(3000),
+        protein_g: z.coerce.number().min(0).max(300),
+        carbs_g: z.coerce.number().min(0).max(500),
+        fat_g: z.coerce.number().min(0).max(300),
+        fiber_g: z.coerce.number().min(0).max(200).optional(),
+      }),
+    )
+    .min(1)
+    .max(15),
+  slot: slotEnum.optional(),
+  date: isoDate.optional(),
+  note: z.string().trim().max(200).optional(),
+});
+
 const logWeight = z.object({
   action: z.literal("log_weight"),
   weight_kg: z.coerce.number().min(25).max(250),
@@ -305,6 +330,7 @@ export const assistantActionSchema = z.discriminatedUnion("action", [
   suggestDishes,
   openPage,
   logMeal,
+  logMealItems,
   logWeight,
   addRecipe,
   generateWeek,
@@ -366,6 +392,10 @@ export function summarizeAction(action: AssistantAction): string {
   switch (action.action) {
     case "log_meal":
       return `Log meal: “${truncate(action.text, 60)}”${action.slot ? ` (${action.slot})` : ""}`;
+    case "log_meal_items": {
+      const total = action.items.reduce((sum, item) => sum + item.kcal, 0);
+      return `Log ${action.items.length} item${action.items.length === 1 ? "" : "s"} from photo (~${Math.round(total)} kcal)`;
+    }
     case "log_weight":
       return `Log today's weigh-in: ${action.weight_kg} kg`;
     case "add_recipe":

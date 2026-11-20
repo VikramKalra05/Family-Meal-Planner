@@ -77,17 +77,29 @@ export async function GET(req: Request) {
   });
 }
 
-const askSchema = z.object({
-  message: z.string().trim().min(1, "Type something first").max(1000),
-  /** Optional model-changer pick (ai_providers.id); default provider when omitted. */
-  provider_id: z.string().uuid().optional(),
-  /** Conversation to append to; omitted/null = start a new chat. */
-  conversation_id: z.string().uuid().nullable().optional(),
-  /** Model override (a model from the picked provider's saved catalog). */
-  model: z.string().trim().min(1).max(120).optional(),
-  /** App path the assistant panel is currently open on. */
-  page: z.string().trim().max(200).optional(),
-});
+const dataImage = z
+  .string()
+  .trim()
+  .max(4_000_000, "That photo is too large")
+  .regex(/^data:image\/(jpeg|jpg|png|webp);base64,[a-z0-9+/=]+$/i, "Unsupported image format");
+
+const askSchema = z
+  .object({
+    message: z.string().trim().max(1000).optional(),
+    /** Compressed data URL from the assistant's photo button. */
+    image: dataImage.optional(),
+    /** Optional model-changer pick (ai_providers.id); default provider when omitted. */
+    provider_id: z.string().uuid().optional(),
+    /** Conversation to append to; omitted/null = start a new chat. */
+    conversation_id: z.string().uuid().nullable().optional(),
+    /** Model override (a model from the picked provider's saved catalog). */
+    model: z.string().trim().min(1).max(120).optional(),
+    /** App path the assistant panel is currently open on. */
+    page: z.string().trim().max(200).optional(),
+  })
+  .refine((value) => Boolean(value.message) || Boolean(value.image), {
+    message: "Type something or attach a photo",
+  });
 
 /** One assistant turn. */
 export async function POST(req: Request) {
@@ -101,8 +113,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: body.error.issues[0]?.message ?? "Invalid message" }, { status: 400 });
   }
 
-  if (!checkRate(`chat:${profile.id}`, 20, 60 * 60 * 1000)) {
-    return NextResponse.json({ error: rateLimited(20, 60 * 60 * 1000) }, { status: 429 });
+  const isPhoto = Boolean(body.data.image);
+  const limit = isPhoto ? 10 : 20;
+  if (!checkRate(`${isPhoto ? "chat-photo" : "chat"}:${profile.id}`, limit, 60 * 60 * 1000)) {
+    return NextResponse.json({ error: rateLimited(limit, 60 * 60 * 1000) }, { status: 429 });
   }
 
   const provider = await resolveChatProvider(body.data.provider_id, profile, body.data.model);
@@ -122,12 +136,13 @@ export async function POST(req: Request) {
     // req.signal fires when the client disconnects (Stop button aborts the
     // fetch) — the loop then cancels the LLM call and skips further steps.
     const result = await runAssistantTurn(
-      body.data.message,
+      body.data.message?.trim() || (body.data.image ? "Log this meal" : ""),
       profile,
       provider,
       req.signal,
       body.data.conversation_id ?? null,
       body.data.page,
+      body.data.image,
     );
     return NextResponse.json(result);
   } catch (e) {

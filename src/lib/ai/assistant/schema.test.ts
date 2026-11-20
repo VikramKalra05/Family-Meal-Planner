@@ -90,6 +90,20 @@ describe("assistantActionSchema", () => {
     expect(assistantActionSchema.safeParse({ action: "delete_recipe", recipe_id: UUID }).success).toBe(true);
     expect(assistantActionSchema.safeParse({ action: "add_shopping_item", item_name: "curd", quantity: "2 kg" }).success).toBe(true);
   });
+
+  it("accepts structured photo items but never as a read", () => {
+    const parsed = assistantActionSchema.parse({
+      action: "log_meal_items",
+      items: [
+        { description: "Dal", grams: 150, kcal: 180, protein_g: 9, carbs_g: 20, fat_g: 6 },
+      ],
+    });
+    expect(isReadAction(parsed)).toBe(false);
+    expect(summarizeAction(parsed)).toContain("from photo");
+    expect(
+      assistantActionSchema.safeParse({ action: "log_meal_items", items: [] }).success,
+    ).toBe(false);
+  });
 });
 
 describe("chatTurnSchema", () => {

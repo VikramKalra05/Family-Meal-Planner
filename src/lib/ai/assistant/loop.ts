@@ -8,8 +8,10 @@ import {
   type ResolvedProvider,
 } from "@/lib/ai/provider";
 import { decryptSecret } from "@/lib/crypto";
+import { istDateISO, istHour } from "@/lib/date";
 import { buildContextSnapshot } from "./context";
 import { systemMessage } from "./prompt";
+import { photoAnalysisPrompt, photoAnalysisSchema } from "./photo";
 import {
   chatTurnSchema,
   isReadAction,
@@ -134,6 +136,123 @@ async function persistMessage(
   });
 }
 
+function slotForNow(): "breakfast" | "lunch" | "snack" | "dinner" {
+  const hour = istHour();
+  return hour < 11 ? "breakfast" : hour < 16 ? "lunch" : hour < 19 ? "snack" : "dinner";
+}
+
+/**
+ * Photo turn: one vision call, no tool loop. The model estimates the plate and
+ * the app turns that into a normal confirmation-gated `log_meal_items` action,
+ * so nothing is written until the member presses Confirm.
+ */
+async function runPhotoTurn(
+  userText: string,
+  image: string,
+  profile: Profile,
+  provider: ResolvedProvider,
+  conversation: string | null,
+  signal?: AbortSignal,
+): Promise<AssistantTurnResult> {
+  const targets = profile.targets_cache?.targets ?? null;
+  const messages: ChatMessage[] = [
+    { role: "system", content: photoAnalysisPrompt(profile, targets) },
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: userText
+            ? `Log this meal. The user adds: ${userText}`
+            : "Log this meal. Estimate the visible portion.",
+        },
+        { type: "image_url", image_url: { url: image } },
+      ],
+    },
+  ];
+  const modelLabel = `${provider.label} · ${provider.model}`;
+
+  try {
+    const parsed = await chatJson(provider, photoAnalysisSchema, messages, {
+      maxTokens: 3000,
+      temperature: 0.2,
+      feature: "meal_photo",
+      signal,
+    });
+
+    if (parsed.items.length === 0) {
+      await persistMessage(
+        profile.id,
+        "assistant",
+        parsed.reply,
+        { tools: ["Analyzed the photo"], model: modelLabel },
+        conversation,
+      );
+      return {
+        reply: parsed.reply,
+        toolTrace: ["Analyzed the photo"],
+        proposal: null,
+        error: null,
+        navigation: null,
+        conversationId: conversation,
+        modelLabel,
+      };
+    }
+
+    const action: AssistantAction = {
+      action: "log_meal_items",
+      items: parsed.items,
+      slot: slotForNow(),
+      date: istDateISO(),
+    };
+    const proposal: AssistantProposal = { action, summary: summarizeAction(action) };
+    await persistMessage(
+      profile.id,
+      "assistant",
+      parsed.reply,
+      { tools: ["Analyzed the photo"], proposal, model: modelLabel },
+      conversation,
+    );
+    return {
+      reply: parsed.reply,
+      toolTrace: ["Analyzed the photo"],
+      proposal,
+      error: null,
+      navigation: null,
+      conversationId: conversation,
+      modelLabel,
+    };
+  } catch (e) {
+    if (signal?.aborted) {
+      await persistMessage(profile.id, "system", "⏹ Stopped — the partial answer was discarded.", { kind: "stopped" }, conversation);
+      return {
+        reply: "",
+        toolTrace: [],
+        proposal: null,
+        error: null,
+        navigation: null,
+        stopped: true,
+        conversationId: conversation,
+        modelLabel,
+      };
+    }
+    const raw = e instanceof ProviderError ? e.message : "Could not read that photo — try again.";
+    const error = /image|vision|multimodal|image_url|unsupported|content/i.test(raw)
+      ? "This model can't read photos. Pick a vision-capable model from the ✨ dropdown (or add one in Settings → AI Providers) and try again."
+      : raw;
+    await persistMessage(profile.id, "system", `error: ${error}`, { kind: "error" }, conversation);
+    return {
+      reply: "",
+      toolTrace: [],
+      proposal: null,
+      error,
+      navigation: null,
+      conversationId: conversation,
+      modelLabel,
+    };
+  }
+}
+
 /**
  * Returns a valid conversation id for the turn: validates the caller's pick
  * (ownership-checked), or opens a new conversation titled from the first
@@ -237,6 +356,7 @@ export async function runAssistantTurn(
   signal: AbortSignal | undefined,
   conversationId: string | null | undefined,
   currentPage?: string,
+  image?: string,
 ): Promise<AssistantTurnResult> {
   // Stop path: persist a thread note so history reflects the cancellation,
   // skip any assistant reply, and tell the client.
@@ -246,7 +366,12 @@ export async function runAssistantTurn(
   };
 
   const conversation = await ensureConversation(profile.id, conversationId, userText);
-  await persistMessage(profile.id, "user", userText, undefined, conversation);
+  // Never persist the base64 photo — only a marker and the user's words.
+  await persistMessage(profile.id, "user", image ? `[photo] ${userText}` : userText, undefined, conversation);
+
+  // Photo turns skip the tool loop and the text snapshot: one vision call →
+  // one confirmable action.
+  if (image) return runPhotoTurn(userText, image, profile, provider, conversation, signal);
 
   const [contextSnapshot, thread] = await Promise.all([
     buildContextSnapshot(profile),
@@ -257,6 +382,7 @@ export async function runAssistantTurn(
     currentPage && currentPage.startsWith("/")
       ? { ...contextSnapshot, current_page: currentPage.slice(0, 160) }
       : contextSnapshot;
+
   // The just-stored user message is the last history entry; the model gets
   // system + prior history + the fresh user line.
   const priorHistory = thread.messages.slice(0, -1);

@@ -634,6 +634,37 @@ export async function executeMutationAction(
       return { ok: true, message: `Logged ${items.length} item${items.length > 1 ? "s" : ""} (~${Math.round(totalKcal)} kcal) to ${slot}.` };
     }
 
+    case "log_meal_items": {
+      const totalKcal = action.items.reduce((sum, item) => sum + item.kcal, 0);
+      if (totalKcal > 8000) {
+        return { ok: false, message: "That photo adds up to over 8,000 kcal — check the items and try a clearer photo." };
+      }
+      const date = action.date ?? istDateISO();
+      const slot = action.slot ?? slotForNow();
+      const { error } = await supabase.from("intake_logs").insert(
+        action.items.map((item) => ({
+          member_id: profile.id,
+          logged_on: date,
+          slot,
+          description:
+            item.grams != null
+              ? `${item.description} (${Math.round(item.grams)} g)`
+              : item.description,
+          kcal: item.kcal,
+          protein_g: item.protein_g,
+          carbs_g: item.carbs_g,
+          fat_g: item.fat_g,
+          fiber_g: item.fiber_g ?? null,
+          source: "ai_chat",
+        })),
+      );
+      if (error) return { ok: false, message: error.message };
+      return {
+        ok: true,
+        message: `Logged ${action.items.length} item${action.items.length === 1 ? "" : "s"} from the photo (~${Math.round(totalKcal)} kcal) to ${slot}.`,
+      };
+    }
+
     case "log_weight": {
       const kg = Math.round(action.weight_kg * 10) / 10;
       const today = istDateISO();
