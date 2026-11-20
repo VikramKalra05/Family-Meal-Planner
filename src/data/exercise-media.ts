@@ -113,6 +113,14 @@ export function exerciseImageUrl(key: string): string | null {
   return `https://cdn.jsdelivr.net/gh/yuhonas/free-exercise-db@main/exercises/${folder}/0.jpg`;
 }
 
+/** Both demo angles (0.jpg, 1.jpg) — used for the equipment photo carousel. */
+export function exerciseImageUrls(key: string): string[] {
+  const folder = EXERCISE_IMAGE_FOLDERS[key];
+  if (!folder) return [];
+  const base = `https://cdn.jsdelivr.net/gh/yuhonas/free-exercise-db@main/exercises/${folder}`;
+  return [`${base}/0.jpg`, `${base}/1.jpg`];
+}
+
 /** Fallback if jsDelivr is unavailable. */
 export function exerciseImageFallback(key: string): string | null {
   const folder = EXERCISE_IMAGE_FOLDERS[key];

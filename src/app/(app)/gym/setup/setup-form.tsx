@@ -1,13 +1,15 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   EQUIPMENT_CATEGORY_LABELS,
   FULL_GYM_IDS,
   GYM_EQUIPMENT,
   HOME_GYM_IDS,
+  equipmentPhotos,
   type EquipmentCategory,
+  type GymEquipment,
 } from "@/data/gym-equipment";
 import { PROGRAM_TEMPLATES } from "@/lib/gym/program";
 import {
@@ -174,46 +176,14 @@ export function SetupForm({ initial }: { initial: SetupInitial }) {
                 role="group"
                 aria-label={`${EQUIPMENT_CATEGORY_LABELS[cat]} equipment`}
               >
-                {list.map((e) => {
-                  const on = selected.has(e.id);
-                  return (
-                    <button
-                      key={e.id}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() => toggle(e.id)}
-                      className={`group relative w-[210px] shrink-0 snap-start overflow-hidden border-2 border-neutral-900 text-left transition-all sm:w-[230px] ${
-                        on
-                          ? "bg-emerald-300 shadow-none"
-                          : "bg-white shadow-[2px_2px_0_#111] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
-                      }`}
-                    >
-                      <div className="aspect-[16/10] overflow-hidden border-b-2 border-neutral-900 bg-neutral-100">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={e.image ?? "/gym-equipment/placeholder.svg"}
-                          alt={e.name}
-                          loading="lazy"
-                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-                          onError={(event) => {
-                            event.currentTarget.src = "/gym-equipment/placeholder.svg";
-                          }}
-                        />
-                      </div>
-                      <div className="p-2.5">
-                        <p className="text-sm font-extrabold leading-snug">{e.name}</p>
-                        {e.hint && (
-                          <p className="mt-1 line-clamp-2 text-xs leading-snug text-neutral-500">{e.hint}</p>
-                        )}
-                      </div>
-                      {on && (
-                        <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center border-2 border-neutral-900 bg-yellow-300 text-[10px] font-extrabold">
-                          ✓
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
+                {list.map((e) => (
+                  <EquipmentCard
+                    key={e.id}
+                    e={e}
+                    on={selected.has(e.id)}
+                    onToggle={() => toggle(e.id)}
+                  />
+                ))}
               </div>
             </div>
           ))}
@@ -441,5 +411,117 @@ export function SetupForm({ initial }: { initial: SetupInitial }) {
         </span>
       </div>
     </form>
+  );
+}
+
+/**
+ * Equipment card with a swipeable photo gallery. The images are a scroll
+ * container (not a button), so a horizontal swipe never toggles selection —
+ * the badge and the caption are the explicit select controls.
+ */
+function EquipmentCard({
+  e,
+  on,
+  onToggle,
+}: {
+  e: GymEquipment;
+  on: boolean;
+  onToggle: () => void;
+}) {
+  const photos = equipmentPhotos(e);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState(0);
+
+  function handleScroll() {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const next = Math.round(el.scrollLeft / Math.max(1, el.clientWidth));
+    setActive((cur) => (cur === next ? cur : next));
+  }
+
+  function page(dir: number) {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * el.clientWidth, behavior: "smooth" });
+  }
+
+  return (
+    <div
+      className={`group relative flex w-[210px] shrink-0 snap-start flex-col overflow-hidden border-2 border-neutral-900 text-left transition-all sm:w-[230px] ${
+        on ? "bg-emerald-300 shadow-none" : "bg-white shadow-[2px_2px_0_#111]"
+      }`}
+    >
+      <div className="relative aspect-[16/10] overflow-hidden border-b-2 border-neutral-900 bg-neutral-100">
+        <div
+          ref={scrollerRef}
+          onScroll={handleScroll}
+          role="group"
+          aria-label={`${e.name} photos`}
+          className="flex h-full snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {(photos.length > 0 ? photos : ["/gym-equipment/placeholder.svg"]).map((src, index) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={`${src}-${index}`}
+              src={src}
+              alt={`${e.name} — photo ${index + 1}`}
+              loading="lazy"
+              draggable={false}
+              onError={(event) => {
+                event.currentTarget.src = "/gym-equipment/placeholder.svg";
+              }}
+              className="h-full w-full shrink-0 select-none snap-center object-cover"
+            />
+          ))}
+        </div>
+
+        {photos.length > 1 && (
+          <>
+            <button
+              type="button"
+              onClick={() => page(-1)}
+              aria-label="Previous photo"
+              className="absolute left-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center border-2 border-neutral-900 bg-white/90 text-xs font-extrabold shadow-[2px_2px_0_#111] transition hover:bg-yellow-200"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              onClick={() => page(1)}
+              aria-label="Next photo"
+              className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center border-2 border-neutral-900 bg-white/90 text-xs font-extrabold shadow-[2px_2px_0_#111] transition hover:bg-yellow-200"
+            >
+              ›
+            </button>
+            <div className="absolute inset-x-0 bottom-1.5 flex justify-center gap-1">
+              {photos.map((src, index) => (
+                <span
+                  key={src}
+                  className={`h-1.5 w-1.5 border border-neutral-900 ${
+                    index === active ? "bg-neutral-900" : "bg-white/80"
+                  }`}
+                />
+              ))}
+            </div>
+          </>
+        )}
+
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-pressed={on}
+          className={`absolute right-1.5 top-1.5 flex items-center gap-1 border-2 border-neutral-900 px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] ${
+            on ? "bg-yellow-300" : "bg-white"
+          }`}
+        >
+          {on ? "✓ Selected" : "+ Select"}
+        </button>
+      </div>
+
+      <button type="button" onClick={onToggle} aria-pressed={on} className="flex-1 p-2.5 text-left">
+        <p className="text-sm font-extrabold leading-snug">{e.name}</p>
+        {e.hint && <p className="mt-1 line-clamp-2 text-xs leading-snug text-neutral-500">{e.hint}</p>}
+      </button>
+    </div>
   );
 }

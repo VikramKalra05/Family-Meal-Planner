@@ -97,19 +97,43 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
     };
   });
 
-  return (
-    <div className="w-full space-y-6">
-      <WeighInReminder weighInTime={profile.weigh_in_time} />
-      <section className="rounded-none border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0_#111]">
-        <h1 className="text-lg font-extrabold uppercase tracking-tight">
-          Namaste, {profile.display_name} 👋
-        </h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          {formatIstDate(new Date())}
-        </p>
-      </section>
+  const loggedKcal = intake.reduce((s, i) => s + i.kcal, 0);
+  const viewingToday = diaryDay === today;
 
-      <WeighInSection loggedToday={weighIn.loggedToday} time={profile.weigh_in_time} latest={weighIn.latestKg} />
+  return (
+    <div className="@container w-full space-y-4">
+      <WeighInReminder weighInTime={profile.weigh_in_time} />
+
+      {/* Top strip: greeting + weigh-in + training */}
+      <div className="grid gap-4 @4xl:grid-cols-3">
+        <section className="@container rounded-none border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0_#111] @4xl:col-span-2">
+          <div className="flex flex-wrap items-center justify-between gap-5">
+            <div className="min-w-0">
+              <h1 className="text-lg font-extrabold uppercase tracking-tight">
+                Namaste, {profile.display_name} 👋
+              </h1>
+              <p className="mt-1 text-sm text-neutral-500">{formatIstDate(new Date())}</p>
+              <p
+                className={`mt-2 text-[11px] font-extrabold uppercase tracking-wide ${
+                  viewingToday && intake.length > 0 ? "text-emerald-700" : "text-neutral-400"
+                }`}
+              >
+                {viewingToday
+                  ? intake.length > 0
+                    ? `${Math.round(loggedKcal)} kcal logged · ${intake.length} item${intake.length === 1 ? "" : "s"}`
+                    : "Nothing logged yet today"
+                  : `Viewing ${formatIstDate(diaryDay, { day: "numeric", month: "short" })} · ${intake.length} item${intake.length === 1 ? "" : "s"}`}
+              </p>
+            </div>
+            <div className="min-w-[260px] flex-1 border-t-2 border-dashed border-neutral-200 pt-4 @2xl:border-l-2 @2xl:border-t-0 @2xl:pl-5 @2xl:pt-0">
+              <WeighInContent
+                loggedToday={weighIn.loggedToday}
+                time={profile.weigh_in_time}
+                latest={weighIn.latestKg}
+              />
+            </div>
+          </div>
+        </section>
 
       <section
         className={`rounded-none border-2 border-neutral-900 p-5 shadow-[4px_4px_0_#111] ${
@@ -167,8 +191,12 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
           </div>
         </div>
       </section>
+      </div>
 
-      <section className="rounded-none border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0_#111]">
+      {/* Main dashboard: targets + diary beside plan + quick actions */}
+      <div className="grid items-start gap-4 @5xl:grid-cols-3">
+        <div className="space-y-4 @5xl:col-span-2">
+          <section className="@container rounded-none border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0_#111]">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">
             Your daily targets
@@ -178,7 +206,7 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
           </Link>
         </div>
         {dayTargets ? (
-          <div className="grid gap-6 md:grid-cols-2">
+          <div className="grid gap-5 @2xl:grid-cols-[minmax(240px,0.9fr)_1.4fr] @5xl:gap-6">
             <div className="flex items-center gap-4">
               <TargetRing kcal={dayTargets.kcal} />
               <div className="text-sm text-neutral-600">
@@ -201,7 +229,7 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2.5 @xl:grid-cols-4">
               {[
                 { label: "Protein", grams: dayTargets.proteinG, cls: "bg-lime-200" },
                 { label: "Carbs", grams: dayTargets.carbsG, cls: "bg-amber-200" },
@@ -210,7 +238,7 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
               ].map((m) => (
                 <div key={m.label} className={`border-2 border-neutral-900 p-2.5 shadow-[3px_3px_0_#111] ${m.cls}`}>
                   <p className="text-[10px] font-extrabold uppercase tracking-widest text-neutral-700">{m.label}</p>
-                  <p className="text-lg font-extrabold text-neutral-900">{m.grams} g</p>
+                  <p className="text-lg font-extrabold tabular-nums text-neutral-900">{m.grams} g</p>
                 </div>
               ))}
             </div>
@@ -221,7 +249,9 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
       </section>
 
       <IntakeDiary key={diaryDay} date={diaryDay} today={today} items={intake} targets={dayTargets ?? null} />
+        </div>
 
+        <div className="@container space-y-4">
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">
@@ -274,12 +304,12 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
         })}
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-none border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0_#111]">
+      <section className="grid gap-4 @2xl:grid-cols-2">
+        <div className="rounded-none border-2 border-neutral-900 bg-white p-4 shadow-[4px_4px_0_#111]">
           <h2 className="mb-3 text-sm font-extrabold uppercase tracking-widest text-neutral-500">Craving check</h2>
           <CravingForm />
         </div>
-        <div className="rounded-none border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0_#111]">
+        <div className="rounded-none border-2 border-neutral-900 bg-white p-4 shadow-[4px_4px_0_#111]">
           <h2 className="mb-3 text-sm font-extrabold uppercase tracking-widest text-neutral-500">AI meal log</h2>
           <AiLogForm />
         </div>
@@ -298,11 +328,13 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
           </p>
         </section>
       )}
+        </div>
+      </div>
     </div>
   );
 }
 
-function WeighInSection({
+function WeighInContent({
   loggedToday,
   time,
   latest,
@@ -312,38 +344,36 @@ function WeighInSection({
   latest: number | null;
 }) {
   return (
-    <section className="rounded-none border-2 border-neutral-900 bg-lime-200 p-5 shadow-[4px_4px_0_#111]">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="flex items-center gap-2 text-sm font-extrabold uppercase tracking-wide text-neutral-900">
-            ⚖️ Weigh-in{" "}
-            {loggedToday ? (
-              <span className="border-2 border-neutral-900 bg-lime-400 px-2 py-0.5 text-[10px]">done today ✓</span>
-            ) : time ? (
-              <span className="border-2 border-neutral-900 bg-white px-2 py-0.5 text-[10px]">reminder {time}</span>
-            ) : null}
-          </h2>
-          <p className="mt-0.5 text-xs text-neutral-700">
-            {loggedToday
-              ? latest != null
-                ? `Today: ${latest} kg — every log keeps your targets accurate.`
-                : "Logged."
-              : latest != null
-                ? `Last logged ${latest} kg. Step on the scale and keep the streak.`
-                : "First weigh-in? Log it — the tracker and targets build from here."}
-          </p>
-        </div>
-        {!loggedToday && <QuickLogForm compact />}
-        {loggedToday && (
-          <Link
-            href="/progress"
-            className="rounded-none border-2 border-neutral-900 bg-white px-3.5 py-2 text-xs font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
-          >
-            View progress →
-          </Link>
-        )}
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="min-w-0">
+        <h2 className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wide text-neutral-900">
+          ⚖️ Weigh-in{" "}
+          {loggedToday ? (
+            <span className="border-2 border-neutral-900 bg-lime-300 px-2 py-0.5 text-[10px]">done today ✓</span>
+          ) : time ? (
+            <span className="border-2 border-neutral-900 bg-white px-2 py-0.5 text-[10px]">reminder {time}</span>
+          ) : null}
+        </h2>
+        <p className="mt-0.5 text-[11px] text-neutral-600">
+          {loggedToday
+            ? latest != null
+              ? `Today: ${latest} kg — every log keeps your targets accurate.`
+              : "Logged."
+            : latest != null
+              ? `Last logged ${latest} kg. Step on the scale and keep the streak.`
+              : "First weigh-in? Log it — the tracker and targets build from here."}
+        </p>
       </div>
-    </section>
+      {!loggedToday && <QuickLogForm compact />}
+      {loggedToday && (
+        <Link
+          href="/progress"
+          className="rounded-none border-2 border-neutral-900 bg-white px-3.5 py-2 text-xs font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+        >
+          Progress →
+        </Link>
+      )}
+    </div>
   );
 }
 

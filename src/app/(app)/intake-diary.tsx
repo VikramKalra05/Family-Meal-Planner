@@ -81,7 +81,7 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
   }
 
   return (
-    <section className="rounded-none border-2 border-neutral-900 bg-white shadow-[4px_4px_0_#111]">
+    <section className="@container rounded-none border-2 border-neutral-900 bg-white shadow-[4px_4px_0_#111]">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-neutral-900 bg-yellow-100 px-5 py-3">
         <div>
           <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-700">Meals &amp; intake</h2>
@@ -141,7 +141,7 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
             style={{ width: `${pctOf(day.kcal, t?.kcal)}%` }}
           />
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 @xl:grid-cols-4">
           {MACROS.map((m) => {
             const value = day[m.key];
             const target = t?.[m.key] ?? null;
@@ -294,7 +294,7 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
           ))}
         </div>
       ) : (
-        <div className="grid gap-3 bg-white p-4 lg:grid-cols-2 2xl:grid-cols-4">
+        <div className="grid gap-3 bg-white p-4 @2xl:grid-cols-2 @5xl:grid-cols-4">
           <p className="col-span-full text-[11px] font-semibold text-neutral-500">
             Where each macro came from — the small bar is that food&apos;s share of the macro you&apos;ve logged.
           </p>
