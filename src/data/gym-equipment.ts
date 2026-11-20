@@ -2,12 +2,14 @@
  * Gym equipment catalogue used by the setup wizard and the exercise library.
  *
  * Images are hotlinked from Wikimedia Commons / Wikipedia (the same pattern
- * the recipe library already uses). Every entry has a local fallback so a
- * dead link never leaves an empty card. Attribution lives in
- * `src/data/gym-equipment-credits.md`.
+ * the recipe library already uses). Extra in-use angles come from
+ * free-exercise-db (public domain) via `@/data/exercise-media`. Every entry has
+ * a local fallback so a dead link never leaves an empty card.
  *
  * `popularity` sorts the picker: 1 = the machines almost every gym has.
  */
+
+import { exerciseImageUrls } from "@/data/exercise-media";
 
 export type EquipmentCategory =
   | "free_weights"
@@ -366,6 +368,70 @@ export const GYM_EQUIPMENT: GymEquipment[] = [
 
 export function equipmentById(id: string): GymEquipment | undefined {
   return GYM_EQUIPMENT.find((e) => e.id === id);
+}
+
+/**
+ * Extra in-use angles from free-exercise-db (public domain). Each key yields
+ * two photos, so cards get a real swipeable gallery instead of one static
+ * shot. The primary Wikimedia `image` stays first.
+ */
+const fromExercises = (...keys: string[]) => keys.flatMap(exerciseImageUrls);
+
+const EXTRA_PHOTOS: Record<string, string[]> = {
+  barbell: fromExercises("seed:bench-press", "seed:deadlift"),
+  dumbbell: fromExercises("seed:dumbbell-bench-press", "seed:dumbbell-curl"),
+  plates: fromExercises("seed:deadlift", "seed:back-squat"),
+  "ez-bar": fromExercises("seed:ez-bar-curl", "seed:skull-crusher"),
+  "trap-bar": [thumb("9/9f", "Trap_bar_%28horizontal%29.jpg")],
+  kettlebell: fromExercises("seed:kettlebell-swing", "seed:farmers-carry"),
+  "bench-flat": fromExercises("seed:bench-press", "seed:dumbbell-bench-press"),
+  "squat-rack": fromExercises("seed:back-squat", "seed:rack-pull"),
+  "bench-adjustable": fromExercises("seed:incline-bench-press", "seed:incline-dumbbell-press"),
+  "pullup-bar": fromExercises("seed:pull-up", "seed:chin-up"),
+  "dip-bars": fromExercises("seed:chest-dip", "seed:bench-dip"),
+  "preacher-bench": fromExercises("seed:preacher-curl"),
+  landmine: fromExercises("seed:t-bar-row", "seed:barbell-row"),
+  "lat-pulldown": fromExercises("seed:lat-pulldown", "seed:straight-arm-pulldown"),
+  "leg-press": fromExercises("seed:leg-press", "seed:leg-press-calf-raise"),
+  "leg-extension": fromExercises("seed:leg-extension"),
+  "leg-curl": fromExercises("seed:lying-leg-curl", "seed:seated-leg-curl"),
+  "chest-press": fromExercises("seed:machine-chest-press"),
+  "shoulder-press": fromExercises("seed:machine-shoulder-press", "seed:overhead-press"),
+  "pec-deck": fromExercises("seed:pec-deck-fly", "seed:reverse-pec-deck"),
+  "seated-row": fromExercises("seed:seated-cable-row"),
+  smith: fromExercises("seed:smith-squat", "seed:smith-bench-press"),
+  "hack-squat": fromExercises("seed:hack-squat"),
+  "calf-raise": fromExercises("seed:standing-calf-raise", "seed:seated-calf-raise"),
+  "hip-thrust": fromExercises("seed:barbell-hip-thrust", "seed:glute-bridge"),
+  "assisted-pullup": fromExercises("seed:assisted-pull-up"),
+  "back-extension": fromExercises("seed:back-extension", "seed:glute-ham-raise"),
+  crossover: fromExercises("seed:cable-fly", "seed:face-pull"),
+  cable: fromExercises("seed:cable-curl", "seed:cable-pushdown"),
+  treadmill: fromExercises("seed:treadmill-run"),
+  elliptical: fromExercises("seed:elliptical-trainer"),
+  bike: fromExercises("seed:stationary-bike"),
+  rower: fromExercises("seed:rowing-machine"),
+  stair: fromExercises("seed:stair-climber"),
+  mat: fromExercises("seed:plank", "seed:dead-bug"),
+  "medicine-ball": fromExercises("seed:russian-twist"),
+  bands: fromExercises("seed:assisted-pull-up"),
+  "stability-ball": [thumb("4/47", "Girl_doing_stability_ball_crunches.jpg")],
+  "foam-roller": [thumb("1/17", "Foam_rolling.jpg")],
+  "ab-wheel": fromExercises("seed:ab-wheel-rollout"),
+  "jump-rope": fromExercises("seed:jump-rope"),
+  "battle-ropes": fromExercises("seed:battle-ropes"),
+  "punching-bag": [thumb("e/e1", "Punching_Bag.jpg")],
+};
+
+/** Primary photo first, then the extra angles. Never returns duplicates. */
+export function equipmentPhotos(equipment: GymEquipment): string[] {
+  return [
+    ...new Set(
+      [equipment.image, ...(EXTRA_PHOTOS[equipment.id] ?? [])].filter(
+        (src): src is string => Boolean(src),
+      ),
+    ),
+  ];
 }
 
 /** Everything a full commercial gym would have. */

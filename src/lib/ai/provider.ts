@@ -78,9 +78,14 @@ export async function resolveProvider(): Promise<ResolvedProvider | null> {
   return null;
 }
 
+export type ChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  /** String for text-only turns; parts for vision (image_url) turns. */
+  content: string | ChatContentPart[];
 }
 
 export class ProviderNotConfiguredError extends Error {

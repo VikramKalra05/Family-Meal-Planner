@@ -47,4 +47,24 @@ describe("normalizeUsage", () => {
     expect(usage.completionTokens).toBe(0);
     expect(usage.estimated).toBe(false);
   });
+
+  it("does not count base64 image payloads in the fallback estimate", () => {
+    const usage = normalizeUsage(
+      undefined,
+      [
+        {
+          content: [
+            { type: "text", text: "a".repeat(400) },
+            {
+              type: "image_url",
+              image_url: { url: `data:image/jpeg;base64,${"x".repeat(200_000)}` },
+            },
+          ],
+        },
+      ],
+      "",
+    );
+    expect(usage.estimated).toBe(true);
+    expect(usage.promptTokens).toBe(100);
+  });
 });
