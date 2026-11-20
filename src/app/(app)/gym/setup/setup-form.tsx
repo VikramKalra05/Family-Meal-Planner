@@ -67,13 +67,19 @@ export function SetupForm({ initial }: { initial: SetupInitial }) {
       .sort((a, b) => a.popularity - b.popularity);
   }, [category, query]);
 
+  // Canonical category order, only non-empty rails (search narrows these).
+  const groups = useMemo(() => {
+    const order = Object.keys(EQUIPMENT_CATEGORY_LABELS) as EquipmentCategory[];
+    return order
+      .map((cat) => [cat, equipment.filter((e) => e.category === cat)] as const)
+      .filter(([, list]) => list.length > 0);
+  }, [equipment]);
+
   const selected = new Set(equipmentIds);
   const toggle = (id: string) =>
     setEquipmentIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const toggleDay = (day: number) =>
-    setTrainingDays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort()));
-
-  function changeUnit(next: WeightUnit) {
+    setTrainingDays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort()));  function changeUnit(next: WeightUnit) {
     setUnit(next);
     setBarWeight(next === "lb" ? 45 : 20);
     setPlates(presetPlates(next));
@@ -151,45 +157,66 @@ export function SetupForm({ initial }: { initial: SetupInitial }) {
           </select>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
-          {equipment.map((e) => {
-            const on = selected.has(e.id);
-            return (
-              <button
-                key={e.id}
-                type="button"
-                aria-pressed={on}
-                onClick={() => toggle(e.id)}
-                className={`relative overflow-hidden border-2 border-neutral-900 text-left transition-all ${
-                  on
-                    ? "bg-emerald-300 shadow-none"
-                    : "bg-white shadow-[2px_2px_0_#111] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
-                }`}
+        <div className="mt-4 space-y-5">
+          {groups.map(([cat, list]) => (
+            <div key={cat}>
+              <div className="mb-2 flex items-baseline justify-between gap-2">
+                <h3 className="text-[11px] font-extrabold uppercase tracking-widest text-neutral-500">
+                  {EQUIPMENT_CATEGORY_LABELS[cat]}
+                  <span className="ml-1.5 font-bold tabular-nums text-neutral-400">{list.length}</span>
+                </h3>
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+                  scroll sideways →
+                </span>
+              </div>
+              <div
+                className="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-3 [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:border [&::-webkit-scrollbar-thumb]:border-neutral-400 [&::-webkit-scrollbar-thumb]:bg-neutral-300 [&::-webkit-scrollbar-track]:bg-neutral-100"
+                role="group"
+                aria-label={`${EQUIPMENT_CATEGORY_LABELS[cat]} equipment`}
               >
-                <div className="aspect-[4/3] overflow-hidden border-b-2 border-neutral-900 bg-neutral-100">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={e.image ?? "/gym-equipment/placeholder.svg"}
-                    alt={e.name}
-                    loading="lazy"
-                    className="h-full w-full object-cover"
-                    onError={(event) => {
-                      event.currentTarget.src = "/gym-equipment/placeholder.svg";
-                    }}
-                  />
-                </div>
-                <div className="p-2">
-                  <p className="text-xs font-extrabold leading-tight">{e.name}</p>
-                  {e.hint && <p className="mt-0.5 line-clamp-2 text-[10px] leading-tight text-neutral-500">{e.hint}</p>}
-                </div>
-                {on && (
-                  <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center border-2 border-neutral-900 bg-yellow-300 text-[10px] font-extrabold">
-                    ✓
-                  </span>
-                )}
-              </button>
-            );
-          })}
+                {list.map((e) => {
+                  const on = selected.has(e.id);
+                  return (
+                    <button
+                      key={e.id}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => toggle(e.id)}
+                      className={`group relative w-[210px] shrink-0 snap-start overflow-hidden border-2 border-neutral-900 text-left transition-all sm:w-[230px] ${
+                        on
+                          ? "bg-emerald-300 shadow-none"
+                          : "bg-white shadow-[2px_2px_0_#111] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+                      }`}
+                    >
+                      <div className="aspect-[16/10] overflow-hidden border-b-2 border-neutral-900 bg-neutral-100">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={e.image ?? "/gym-equipment/placeholder.svg"}
+                          alt={e.name}
+                          loading="lazy"
+                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                          onError={(event) => {
+                            event.currentTarget.src = "/gym-equipment/placeholder.svg";
+                          }}
+                        />
+                      </div>
+                      <div className="p-2.5">
+                        <p className="text-sm font-extrabold leading-snug">{e.name}</p>
+                        {e.hint && (
+                          <p className="mt-1 line-clamp-2 text-xs leading-snug text-neutral-500">{e.hint}</p>
+                        )}
+                      </div>
+                      {on && (
+                        <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center border-2 border-neutral-900 bg-yellow-300 text-[10px] font-extrabold">
+                          ✓
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
         {equipment.length === 0 && (
           <p className="mt-4 border-2 border-dashed border-neutral-300 p-4 text-center text-xs text-neutral-400">
