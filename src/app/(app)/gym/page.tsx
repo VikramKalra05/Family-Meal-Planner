@@ -3,7 +3,7 @@ import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
 import { istDateISO } from "@/lib/date";
 import { addDays, weekdayIndex, WEEKDAY_LABELS } from "@/lib/gym/types";
-import { getGymToday, getRecentSessions, getExerciseMap } from "@/lib/gym/data";
+import { getGymToday, getRecentSessions, getExerciseMap, getProgramDayNames } from "@/lib/gym/data";
 import { startSession, useStreakFreeze } from "./actions";
 import { SubmitButton } from "@/components/submit-button";
 
@@ -38,7 +38,7 @@ export default async function GymPage() {
   const today = istDateISO();
   const supabase = await createClient();
 
-  const [gymToday, recent, intakeRes, exerciseMap] = await Promise.all([
+  const [gymToday, recent, intakeRes, exerciseMap, dayNames] = await Promise.all([
     getGymToday(profile, today),
     getRecentSessions(profile.id, 5),
     supabase
@@ -47,18 +47,19 @@ export default async function GymPage() {
       .eq("member_id", profile.id)
       .eq("logged_on", today),
     getExerciseMap(profile.id),
+    getProgramDayNames(profile.id),
   ]);
 
-  const { gym, program, programDay, session, streak, fuel, isTrainingDay } = gymToday;
+  const { gym, programDay, session, streak, fuel, isTrainingDay } = gymToday;
   const eaten = (intakeRes.data ?? []).reduce((s, l) => s + Number(l.kcal), 0);
   const eatenProtein = (intakeRes.data ?? []).reduce((s, l) => s + Number(l.protein_g), 0);
   const eatenCarbs = (intakeRes.data ?? []).reduce((s, l) => s + Number(l.carbs_g), 0);
   const eatenFat = (intakeRes.data ?? []).reduce((s, l) => s + Number(l.fat_g), 0);
   const nextDay = nextTrainingDay(today, gym?.training_days ?? []);
   const lastSession = recent.find((s) => s.status === "completed");
-  const lastDay = lastSession?.program_day_id
-    ? program?.days.find((d) => d.id === lastSession.program_day_id)
-    : null;
+  const lastDayName = lastSession?.program_day_id
+    ? (dayNames.get(lastSession.program_day_id) ?? "Workout")
+    : "Workout";
   const missed = streak.recentMisses[0];
 
   return (
@@ -282,7 +283,7 @@ export default async function GymPage() {
               {lastSession ? (
                 <>
                   <p className="mt-2 text-lg font-extrabold">
-                    {lastDay?.name ?? "Workout"} ·{" "}
+                    {lastDayName} ·{" "}
                     <span className="text-sm font-medium text-neutral-500">
                       {new Date(`${lastSession.session_date}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" })}
                     </span>

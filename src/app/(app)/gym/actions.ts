@@ -7,7 +7,7 @@ import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
 import { istDateISO } from "@/lib/date";
 import { GYM_EQUIPMENT } from "@/data/gym-equipment";
-import { buildProgram, templateById } from "@/lib/gym/program";
+import { buildProgram, templateById, type ProgramTemplate } from "@/lib/gym/program";
 import { calorieFloorFor } from "@/lib/gym/fuel";
 import { KG_BARS, LB_BARS, type PlateDenom, type WeightUnit, clamp } from "@/lib/gym/types";
 
@@ -25,6 +25,108 @@ function parseJson<T>(value: FormDataEntryValue | null, fallback: T): T {
 }
 
 const equipmentIds = new Set(GYM_EQUIPMENT.map((e) => e.id));
+
+type ServerClient = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * Builds a program and all its days/exercises as INACTIVE. The current
+ * program is untouched until `activateProgram` succeeds, so a failed insert
+ * can never leave the member with no program.
+ */
+async function createInactiveProgram(
+  supabase: ServerClient,
+  profileId: string,
+  template: ProgramTemplate,
+  ids: string[],
+): Promise<{ id: string } | { error: string }> {
+  const built = buildProgram(template, ids);
+  const { data: program, error } = await supabase
+    .from("programs")
+    .insert({
+      member_id: profileId,
+      name: built.name,
+      template: built.templateId,
+      days_per_week: built.days.length,
+      is_active: false,
+    })
+    .select("id")
+    .single();
+  if (error || !program) return { error: error?.message ?? "Could not create program" };
+
+  const cleanup = async () => {
+    // Cascades program_days + program_exercises.
+    await supabase.from("programs").delete().eq("id", program.id).eq("member_id", profileId);
+  };
+
+  for (const [index, day] of built.days.entries()) {
+    const { data: programDay, error: dayError } = await supabase
+      .from("program_days")
+      .insert({ program_id: program.id, day_index: index, name: day.name, focus: day.focus })
+      .select("id")
+      .single();
+    if (dayError || !programDay) {
+      await cleanup();
+      return { error: dayError?.message ?? "Could not create day" };
+    }
+
+    if (day.exercises.length > 0) {
+      const { error: exercisesError } = await supabase.from("program_exercises").insert(
+        day.exercises.map((e, position) => ({
+          program_day_id: programDay.id,
+          exercise_key: e.exerciseKey,
+          position,
+          target_sets: e.sets,
+          rep_min: e.repMin,
+          rep_max: e.repMax,
+          increment_kg: e.incrementKg,
+        })),
+      );
+      if (exercisesError) {
+        await cleanup();
+        return { error: exercisesError.message };
+      }
+    }
+  }
+
+  return { id: program.id };
+}
+
+/** Swaps the active program. Reactivates the old one if activation fails. */
+async function activateProgram(
+  supabase: ServerClient,
+  profileId: string,
+  newProgramId: string,
+): Promise<string | null> {
+  const { data: current, error: readError } = await supabase
+    .from("programs")
+    .select("id")
+    .eq("member_id", profileId)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (readError) return readError.message;
+  if (current?.id === newProgramId) return null;
+
+  if (current) {
+    const { error: deactivateError } = await supabase
+      .from("programs")
+      .update({ is_active: false })
+      .eq("id", current.id);
+    if (deactivateError) return deactivateError.message;
+  }
+
+  const { error: activateError } = await supabase
+    .from("programs")
+    .update({ is_active: true })
+    .eq("id", newProgramId);
+  if (activateError) {
+    if (current) {
+      await supabase.from("programs").update({ is_active: true }).eq("id", current.id);
+    }
+    await supabase.from("programs").delete().eq("id", newProgramId).eq("member_id", profileId);
+    return activateError.message;
+  }
+  return null;
+}
 
 // ── Setup ───────────────────────────────────────────────────────────────────
 const setupSchema = z.object({
@@ -87,49 +189,16 @@ export async function saveGymSetup(
   );
   if (gymError) return { error: gymError.message, ok: null };
 
-  // One active program at a time; the partial unique index enforces it too.
-  await supabase.from("programs").update({ is_active: false }).eq("member_id", profile.id).eq("is_active", true);
-
-  const built = buildProgram(template, ids);
-  const { data: program, error: programError } = await supabase
-    .from("programs")
-    .insert({
-      member_id: profile.id,
-      name: built.name,
-      template: built.templateId,
-      days_per_week: built.days.length,
-      is_active: true,
-    })
-    .select("id")
-    .single();
-  if (programError || !program) return { error: programError?.message ?? "Could not create program", ok: null };
-
-  for (const [index, day] of built.days.entries()) {
-    const { data: programDay, error: dayError } = await supabase
-      .from("program_days")
-      .insert({ program_id: program.id, day_index: index, name: day.name, focus: day.focus })
-      .select("id")
-      .single();
-    if (dayError || !programDay) return { error: dayError?.message ?? "Could not create day", ok: null };
-
-    if (day.exercises.length > 0) {
-      const { error: exercisesError } = await supabase.from("program_exercises").insert(
-        day.exercises.map((e, position) => ({
-          program_day_id: programDay.id,
-          exercise_key: e.exerciseKey,
-          position,
-          target_sets: e.sets,
-          rep_min: e.repMin,
-          rep_max: e.repMax,
-          increment_kg: e.incrementKg,
-        })),
-      );
-      if (exercisesError) return { error: exercisesError.message, ok: null };
-    }
-  }
+  // Build the replacement as inactive, then swap atomically. A failed build
+  // leaves the current program active instead of stranding the member.
+  const created = await createInactiveProgram(supabase, profile.id, template, ids);
+  if ("error" in created) return { error: created.error, ok: null };
+  const activationError = await activateProgram(supabase, profile.id, created.id);
+  if (activationError) return { error: activationError, ok: null };
 
   revalidatePath("/gym");
   revalidatePath("/gym/setup");
+  revalidatePath("/gym/plan");
   revalidatePath("/");
   revalidatePath("/week");
   return { error: null, ok: "Gym saved — your program is ready." };
@@ -149,37 +218,16 @@ export async function rebuildProgram(formData: FormData): Promise<void> {
   const template = templateById(templateId.data);
   if (!template) return;
 
-  await supabase.from("programs").update({ is_active: false }).eq("member_id", profile.id).eq("is_active", true);
-  const built = buildProgram(template, gym?.equipment_ids ?? []);
-  const { data: program } = await supabase
-    .from("programs")
-    .insert({ member_id: profile.id, name: built.name, template: built.templateId, days_per_week: built.days.length, is_active: true })
-    .select("id")
-    .single();
-  if (!program) return;
-
-  for (const [index, day] of built.days.entries()) {
-    const { data: programDay } = await supabase
-      .from("program_days")
-      .insert({ program_id: program.id, day_index: index, name: day.name, focus: day.focus })
-      .select("id")
-      .single();
-    if (!programDay) continue;
-    await supabase.from("program_exercises").insert(
-      day.exercises.map((e, position) => ({
-        program_day_id: programDay.id,
-        exercise_key: e.exerciseKey,
-        position,
-        target_sets: e.sets,
-        rep_min: e.repMin,
-        rep_max: e.repMax,
-        increment_kg: e.incrementKg,
-      })),
-    );
-  }
+  const created = await createInactiveProgram(supabase, profile.id, template, gym?.equipment_ids ?? []);
+  if ("error" in created) return;
+  const activationError = await activateProgram(supabase, profile.id, created.id);
+  if (activationError) return;
 
   revalidatePath("/gym");
   revalidatePath("/gym/plan");
+  revalidatePath("/gym/history");
+  revalidatePath("/");
+  revalidatePath("/week");
 }
 
 // ── Sessions ────────────────────────────────────────────────────────────────

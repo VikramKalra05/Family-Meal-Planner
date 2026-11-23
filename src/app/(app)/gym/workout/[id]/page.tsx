@@ -6,6 +6,7 @@ import {
   getExerciseMap,
   getGym,
   getLastSets,
+  getProgramDayDetail,
   getSession,
   getSessionSets,
 } from "@/lib/gym/data";
@@ -64,7 +65,13 @@ export default async function WorkoutPage({ params }: { params: Promise<{ id: st
   }
 
   const unit = gym.unit as WeightUnit;
-  const programDay = program?.days.find((d) => d.id === session.program_day_id) ?? null;
+  // Prefer the active program, but a session from an older program must keep
+  // its planned exercises after a rebuild/setup change.
+  const programDay =
+    program?.days.find((d) => d.id === session.program_day_id) ??
+    (session.program_day_id
+      ? await getProgramDayDetail(session.program_day_id, profile.id)
+      : null);
   const exercises: WorkoutExercise[] = (programDay?.exercises ?? []).map((e) => ({
     key: e.exercise_key,
     name: exerciseMap.get(e.exercise_key)?.name ?? "Custom exercise",

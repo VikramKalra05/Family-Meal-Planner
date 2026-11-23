@@ -74,6 +74,54 @@ export const getActiveProgram = cache(async (memberId: string): Promise<ProgramW
   };
 });
 
+/** Names of every program day the member owns — active or archived. */
+export const getProgramDayNames = cache(async (memberId: string): Promise<Map<string, string>> => {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("program_days")
+    .select("id, name, programs!inner(member_id)")
+    .eq("programs.member_id", memberId);
+  const rows = (data ?? []) as unknown as { id: string; name: string }[];
+  return new Map(rows.map((d) => [d.id, d.name]));
+});
+
+/**
+ * One program day with its exercises, regardless of whether the program is
+ * still active. Past sessions must keep their plan after a rebuild.
+ */
+export const getProgramDayDetail = cache(
+  async (
+    dayId: string,
+    memberId: string,
+  ): Promise<(ProgramDay & { exercises: ProgramExercise[] }) | null> => {
+    const supabase = await createClient();
+    const { data: day } = await supabase
+      .from("program_days")
+      .select("*")
+      .eq("id", dayId)
+      .maybeSingle();
+    if (!day) return null;
+
+    const { data: program } = await supabase
+      .from("programs")
+      .select("id")
+      .eq("id", day.program_id)
+      .eq("member_id", memberId)
+      .maybeSingle();
+    if (!program) return null;
+
+    const { data: exercises } = await supabase
+      .from("program_exercises")
+      .select("*")
+      .eq("program_day_id", dayId)
+      .order("position");
+    return {
+      ...(day as ProgramDay),
+      exercises: (exercises ?? []) as ProgramExercise[],
+    };
+  },
+);
+
 export const getCustomExercises = cache(async (memberId: string): Promise<CustomExercise[]> => {
   const supabase = await createClient();
   const { data } = await supabase
@@ -85,7 +133,10 @@ export const getCustomExercises = cache(async (memberId: string): Promise<Custom
 });
 
 /** Seed + custom, with custom exercises always considered available. */
-export async function getExerciseLibrary(memberId: string, equipmentIds: string[]): Promise<ExerciseView[]> {
+export async function getExerciseLibrary(
+  memberId: string,
+  equipmentIds: string[],
+): Promise<ExerciseView[]> {
   const custom = await getCustomExercises(memberId);
   const seed = availableExercises(equipmentIds);
   const customViews: ExerciseView[] = custom.map((e) => ({
