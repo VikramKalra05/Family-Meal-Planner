@@ -175,6 +175,13 @@ export async function retryFailed(): Promise<void> {
   void flushQueue();
 }
 
+/** Drop rejected copies from this device. The server never saved them. */
+export async function discardFailed(): Promise<void> {
+  const items = await readQueue();
+  await deleteItems(items.filter((i) => i.status === "error").map((i) => i.id));
+  await notify();
+}
+
 export function subscribeQueue(listener: (summary: QueueSummary) => void): () => void {
   listeners.add(listener);
   void notify();

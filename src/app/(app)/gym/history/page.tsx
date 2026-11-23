@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireFullProfile } from "@/lib/profile";
 import { getGym, getProgramDayNames, getRecentSessions, getSetsForSessions, getStreakFreezes } from "@/lib/gym/data";
-import { addDays, weekdayIndex } from "@/lib/gym/types";
+import { addDays, weekdayIndex, WEEKDAY_LABELS } from "@/lib/gym/types";
 import { istDateISO } from "@/lib/date";
 import { computeStreak } from "@/lib/gym/streak";
 import { completedSessionDates } from "@/lib/gym/sessions";
@@ -78,16 +78,28 @@ export default async function GymHistoryPage() {
       <section className="rounded-none border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0_#111]">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">Last 12 weeks</h2>
-          <div className="flex items-center gap-2 text-[9px] font-extrabold uppercase text-neutral-400">
+          <div className="flex flex-wrap items-center gap-2 text-[9px] font-extrabold uppercase text-neutral-400">
             <span className="h-3 w-3 border border-neutral-900 bg-emerald-400" /> done
             <span className="h-3 w-3 border border-neutral-900 bg-amber-200" /> in progress
+            <span className="h-3 w-3 border border-neutral-900 bg-amber-300" /> frozen
             <span className="h-3 w-3 border border-neutral-900 bg-red-200" /> missed
             <span className="h-3 w-3 border border-neutral-900 bg-neutral-100" /> rest
           </div>
         </div>
         <div className="mt-3 overflow-x-auto">
-          <div className="grid w-max grid-flow-col grid-rows-7 gap-1">
-            {days.map((date) => {
+          <div className="flex gap-2">
+            <div className="grid grid-rows-7 gap-1 py-0.5">
+              {WEEKDAY_LABELS.map((label) => (
+                <span
+                  key={label}
+                  className="flex h-4 items-center text-[9px] font-extrabold uppercase text-neutral-400"
+                >
+                  {label.slice(0, 2)}
+                </span>
+              ))}
+            </div>
+            <div className="grid w-max grid-flow-col grid-rows-7 gap-1">
+              {days.map((date) => {
               const scheduled = (gym?.training_days ?? []).includes(weekdayIndex(date));
               const future = date > today;
               const done = completedDays.has(date);
@@ -114,6 +126,7 @@ export default async function GymHistoryPage() {
                 />
               );
             })}
+            </div>
           </div>
         </div>
       </section>
