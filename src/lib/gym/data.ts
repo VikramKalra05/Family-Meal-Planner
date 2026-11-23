@@ -373,7 +373,6 @@ export interface GymToday {
   session: WorkoutSession | null;
   streak: StreakResult;
   fuel: DayFuel | null;
-  lastSets: Record<string, SetLog[]>;
   isTrainingDay: boolean;
 }
 
@@ -393,6 +392,16 @@ export async function getGymToday(profile: Profile, today = istDateISO()): Promi
   const isTrainingDay = (gym?.training_days ?? []).includes(weekday);
   const programDay = program ? programDayForDate(program.days, gym?.training_days ?? [], weekday) : null;
   const session = pickSessionForDate(sessions, today);
+
+  // If an open session belongs to an older program, preview that day — the
+  // Resume link opens it, so the card must not show the new program's day.
+  let cardDay = programDay;
+  if (session?.status === "in_progress" && session.program_day_id) {
+    const sessionDay =
+      program?.days.find((d) => d.id === session.program_day_id) ??
+      (await getProgramDayDetail(session.program_day_id, profile.id));
+    if (sessionDay) cardDay = sessionDay;
+  }
 
   const streak = computeStreak({
     sessionDates: completedSessionDates(sessions),
@@ -417,8 +426,5 @@ export async function getGymToday(profile: Profile, today = istDateISO()): Promi
       })
     : null;
 
-  const keys = programDay?.exercises.map((e) => e.exercise_key) ?? [];
-  const lastSets = await getLastSets(profile.id, keys, session?.id);
-
-  return { gym, program, programDay, session, streak, fuel, lastSets, isTrainingDay };
+  return { gym, program, programDay: cardDay, session, streak, fuel, isTrainingDay };
 }

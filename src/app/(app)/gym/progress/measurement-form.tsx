@@ -27,9 +27,12 @@ export function MeasurementForm({
 }) {
   const [state, action] = useActionState(saveMeasurement, { error: null, ok: null });
   const [measuredOn, setMeasuredOn] = useState(today);
+  // Only prefill today's/latest values: choosing another date must not copy
+  // today's numbers over that date's existing row.
+  const seeded = measuredOn === today ? (initial ?? null) : null;
 
   return (
-    <form key={state.ok ?? "new"} action={action} className="mt-3 space-y-2">
+    <form key={`${measuredOn}-${state.ok ?? "new"}`} action={action} className="mt-3 space-y-2">
       <div className="block text-[10px] font-extrabold uppercase tracking-widest text-neutral-500">
         Date
         <DatePicker
@@ -46,12 +49,12 @@ export function MeasurementForm({
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {[
-          { name: "waist", label: "Waist", value: initial?.waist },
-          { name: "chest", label: "Chest", value: initial?.chest },
-          { name: "arm", label: "Arm", value: initial?.arm },
-          { name: "thigh", label: "Thigh", value: initial?.thigh },
-          { name: "hip", label: "Hip", value: initial?.hip },
-          { name: "neck", label: "Neck", value: initial?.neck },
+          { name: "waist", label: "Waist", value: seeded?.waist },
+          { name: "chest", label: "Chest", value: seeded?.chest },
+          { name: "arm", label: "Arm", value: seeded?.arm },
+          { name: "thigh", label: "Thigh", value: seeded?.thigh },
+          { name: "hip", label: "Hip", value: seeded?.hip },
+          { name: "neck", label: "Neck", value: seeded?.neck },
         ].map((f) => (
           <label key={f.name} className="block text-[10px] font-extrabold uppercase tracking-widest text-neutral-500">
             {f.label} (cm)
@@ -72,7 +75,7 @@ export function MeasurementForm({
           type="text"
           name="notes"
           maxLength={300}
-          defaultValue={initial?.notes ?? ""}
+          defaultValue={seeded?.notes ?? ""}
           placeholder="Morning, empty stomach…"
           className={input}
         />

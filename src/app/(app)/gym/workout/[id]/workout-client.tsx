@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PlatePicker, type PickedPlate } from "./plate-picker";
@@ -8,6 +8,7 @@ import { epley1rm, isPr as isNewPr } from "@/lib/gym/e1rm";
 import { suggestNextLoad } from "@/lib/gym/progression";
 import { warmupRamp } from "@/lib/gym/plates";
 import {
+  discardFailed,
   enqueue,
   flushQueue,
   installAutoFlush,
@@ -99,6 +100,7 @@ export function WorkoutClient({
   library: { key: string; name: string }[];
 }) {
   const router = useRouter();
+  const loggingRef = useRef<Set<string>>(new Set());
   const readOnly = status === "completed" || status === "skipped";
 
   const initialOrder = useMemo(() => {
@@ -173,7 +175,23 @@ export function WorkoutClient({
     }));
   }
 
+  /** Guards against a double-tap logging the same row twice. */
   async function logSet(
+    key: string,
+    index: number,
+    opts?: { weight?: number; chips?: PickedPlate[] },
+  ) {
+    const rowKey = `${key}:${index}`;
+    if (loggingRef.current.has(rowKey)) return;
+    loggingRef.current.add(rowKey);
+    try {
+      await logSetInner(key, index, opts);
+    } finally {
+      loggingRef.current.delete(rowKey);
+    }
+  }
+
+  async function logSetInner(
     key: string,
     index: number,
     opts?: { weight?: number; chips?: PickedPlate[] },
@@ -350,13 +368,23 @@ export function WorkoutClient({
             {queueState.errors} saved set{queueState.errors === 1 ? "" : "s"} rejected by the server
             {queueState.firstError ? `: ${queueState.firstError}` : "."}
           </span>
-          <button
-            type="button"
-            onClick={() => void retryFailed()}
-            className="border-2 border-neutral-900 bg-white px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111]"
-          >
-            Retry sync
-          </button>
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => void retryFailed()}
+              className="border-2 border-neutral-900 bg-white px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111]"
+            >
+              Retry sync
+            </button>
+            <button
+              type="button"
+              onClick={() => void discardFailed()}
+              title="Remove the rejected copy from this device"
+              className="border-2 border-neutral-900 bg-white px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-red-700 shadow-[2px_2px_0_#111]"
+            >
+              Discard
+            </button>
+          </div>
         </div>
       )}
 

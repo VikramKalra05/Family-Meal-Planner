@@ -75,6 +75,14 @@ export default async function ProgramPage() {
                 </span>
               );
             })}
+            {trainingDays.length !== program.days.length && (
+              <p className="w-full text-[11px] font-bold text-amber-700">
+                {program.days.length}-day program · {trainingDays.length} training days —{" "}
+                {trainingDays.length > program.days.length
+                  ? "program days repeat across the week."
+                  : "some program days are unscheduled; add training days or pick a shorter template."}
+              </p>
+            )}
             {gym && (
               <span className="ml-auto text-neutral-400">
                 Equipment: {equipmentNames(gym.equipment_ids).length} selected
@@ -84,7 +92,9 @@ export default async function ProgramPage() {
 
           <div className="grid gap-4 lg:grid-cols-2">
             {program.days.map((day, index) => {
-              const weekday = trainingDays[index];
+              const weekdays = trainingDays.filter(
+                (_, position) => position % program.days.length === index,
+              );
               return (
                 <section key={day.id} className="rounded-none border-2 border-neutral-900 bg-white p-4 shadow-[4px_4px_0_#111]">
                   <div className="flex items-start justify-between gap-2">
@@ -95,7 +105,9 @@ export default async function ProgramPage() {
                       <h2 className="text-base font-extrabold">{day.name}</h2>
                     </div>
                     <span className="border-2 border-neutral-900 bg-yellow-300 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide">
-                      {weekday != null ? WEEKDAY_LABELS[weekday] : "Unscheduled"}
+                      {weekdays.length > 0
+                        ? weekdays.map((weekday) => WEEKDAY_LABELS[weekday]).join(" · ")
+                        : "Unscheduled"}
                     </span>
                   </div>
                   <ul className="mt-3 divide-y-2 divide-neutral-100 border-y-2 border-neutral-900">

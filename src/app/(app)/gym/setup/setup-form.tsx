@@ -101,6 +101,7 @@ export function SetupForm({ initial }: { initial: SetupInitial }) {
   }
 
   const bars = unit === "lb" ? LB_BARS : KG_BARS;
+  const selectedTemplate = PROGRAM_TEMPLATES.find((t) => t.id === templateId);
 
   return (
     <form action={action} className="space-y-5">
@@ -231,6 +232,15 @@ export function SetupForm({ initial }: { initial: SetupInitial }) {
             ? "Pick at least one day."
             : `${trainingDays.length} training days · ${7 - trainingDays.length} rest days`}
         </p>
+        {selectedTemplate && selectedTemplate.daysPerWeek !== trainingDays.length && (
+          <p className="mt-1 text-[11px] font-bold text-amber-700">
+            {selectedTemplate.name} is built for {selectedTemplate.daysPerWeek} days; you have{" "}
+            {trainingDays.length} selected.{" "}
+            {trainingDays.length > selectedTemplate.daysPerWeek
+              ? "Program days will repeat across the week."
+              : "Some program days will be unscheduled."}
+          </p>
+        )}
       </section>
 
       {/* ── Bar & plates ──────────────────────────────────────────────── */}
