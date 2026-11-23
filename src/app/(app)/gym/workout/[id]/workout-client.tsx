@@ -243,7 +243,11 @@ export function WorkoutClient({
 
   async function removeSet(set: WorkoutSet) {
     setLogged((prev) => prev.filter((s) => s.id !== set.id));
-    await enqueue({ id: set.id, kind: "set_delete" });
+    await enqueue({
+      id: set.id,
+      kind: "set_delete",
+      data: { client_updated_at: new Date().toISOString() },
+    });
     await flushQueue();
   }
 
