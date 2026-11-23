@@ -64,8 +64,10 @@ export function CravingForm() {
 export function AiLogForm({ today }: { today: string }) {
   const [state, action, pending] = useActionState(aiLogIntakeAction, init);
   const draft = state.draft ?? null;
-  const totals = draft
-    ? draft.items.reduce(
+  const logDraft = draft?.kind === "log" ? draft : null;
+  const moveDraft = draft?.kind === "move" ? draft : null;
+  const totals = logDraft
+    ? logDraft.items.reduce(
         (acc, item) => ({
           kcal: acc.kcal + item.kcal,
           protein: acc.protein + item.proteinG,
@@ -86,7 +88,7 @@ export function AiLogForm({ today }: { today: string }) {
           rows={2}
           required
           disabled={pending}
-          placeholder="2 roti and dal for lunch, plus a mango"
+          placeholder="2 roti and dal, or 'move the soya tikki to breakfast'"
           className={`${input} resize-none`}
           onKeyDown={(event) => {
             if (event.key !== "Enter" || event.shiftKey) return;
@@ -104,7 +106,7 @@ export function AiLogForm({ today }: { today: string }) {
             {pending && !draft ? "◌ Reading…" : "✨ Parse & review"}
           </button>
           <p className="text-[10px] text-neutral-400">
-            Enter to review · Shift+Enter for a new line · Hinglish is fine. You confirm before anything is saved.
+            Enter to review · Shift+Enter for a new line · Hinglish is fine · Move requests work too.
           </p>
         </div>
         {pending && !draft && (
@@ -115,17 +117,17 @@ export function AiLogForm({ today }: { today: string }) {
         )}
       </form>
 
-      {draft && totals && (
+      {logDraft && totals && (
         <div className="border-2 border-neutral-900 bg-amber-100 p-3 shadow-[3px_3px_0_#111]">
           <p className="text-[9px] font-extrabold uppercase tracking-widest text-neutral-500">
             Confirm before logging
           </p>
           <p className="mt-1 text-xs font-bold">
-            {SLOT_LABEL[draft.slot] ?? draft.slot} · {draft.date === today ? "today" : draft.date} ·{" "}
-            {draft.items.length} item{draft.items.length === 1 ? "" : "s"}
+            {SLOT_LABEL[logDraft.slot]} · {logDraft.date === today ? "today" : logDraft.date} ·{" "}
+            {logDraft.items.length} item{logDraft.items.length === 1 ? "" : "s"}
           </p>
           <ul className="mt-2 divide-y-2 divide-neutral-900/10 border-y-2 border-neutral-900/10">
-            {draft.items.map((item, index) => (
+            {logDraft.items.map((item, index) => (
               <li key={`${item.name}-${index}`} className="flex items-start justify-between gap-3 py-1.5">
                 <span className="text-xs font-semibold text-neutral-800">{intakeDescription(item)}</span>
                 <span className="shrink-0 text-xs font-bold tabular-nums text-neutral-600">
@@ -141,7 +143,7 @@ export function AiLogForm({ today }: { today: string }) {
             <span className="ml-auto text-neutral-800">{Math.round(totals.kcal)} kcal</span>
           </div>
           <form action={action} className="mt-3 flex flex-wrap gap-2">
-            <input type="hidden" name="draft" value={JSON.stringify(draft)} />
+            <input type="hidden" name="draft" value={JSON.stringify(logDraft)} />
             <button
               type="submit"
               name="mode"
@@ -150,6 +152,42 @@ export function AiLogForm({ today }: { today: string }) {
               className="rounded-none border-2 border-neutral-900 bg-emerald-400 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] nb-press disabled:opacity-50"
             >
               {pending ? "◌ Logging…" : "Confirm & log"}
+            </button>
+            <button
+              type="submit"
+              name="mode"
+              value="cancel"
+              disabled={pending}
+              className="rounded-none border-2 border-neutral-900 bg-white px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] nb-press disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </form>
+        </div>
+      )}
+
+      {moveDraft && (
+        <div className="border-2 border-neutral-900 bg-lime-100 p-3 shadow-[3px_3px_0_#111]">
+          <p className="text-[9px] font-extrabold uppercase tracking-widest text-neutral-500">
+            Confirm before moving
+          </p>
+          <p className="mt-1 text-sm font-extrabold text-neutral-900">{moveDraft.description}</p>
+          <p className="mt-1 text-xs font-bold">
+            {SLOT_LABEL[moveDraft.fromSlot]} → {SLOT_LABEL[moveDraft.toSlot]}
+            <span className="ml-2 font-medium text-neutral-400">
+              · {moveDraft.date === today ? "today" : moveDraft.date}
+            </span>
+          </p>
+          <form action={action} className="mt-3 flex flex-wrap gap-2">
+            <input type="hidden" name="draft" value={JSON.stringify(moveDraft)} />
+            <button
+              type="submit"
+              name="mode"
+              value="confirm"
+              disabled={pending}
+              className="rounded-none border-2 border-neutral-900 bg-emerald-400 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] nb-press disabled:opacity-50"
+            >
+              {pending ? "◌ Moving…" : "Confirm move"}
             </button>
             <button
               type="submit"

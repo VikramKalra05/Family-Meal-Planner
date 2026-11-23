@@ -9,38 +9,61 @@ import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
 import { istDateISO, istHour } from "@/lib/date";
 import {
-  MEAL_PARSE_SYSTEM,
+  MEAL_COMMAND_SYSTEM,
   intakeDescription,
+  mealCommandSchema,
   mealParseItemSchema,
-  mealParseSchema,
+  type MealCommand,
+  type MealMoveCommand,
   type MealParseItem,
 } from "@/lib/ai/meal-parse";
 import type { MealSlot } from "@/lib/db-types";
+import { findIntakeMatch, type IntakeMatchRow } from "@/lib/intake-match";
 
-export interface AiLogDraft {
-  items: MealParseItem[];
-  slot: MealSlot;
-  date: string;
-}
+export type AiLogDraft =
+  | { kind: "log"; items: MealParseItem[]; slot: MealSlot; date: string }
+  | {
+      kind: "move";
+      rowId: string;
+      description: string;
+      fromSlot: MealSlot;
+      toSlot: MealSlot;
+      date: string;
+    };
 
 export type IntakeActionState = {
   error: string | null;
   ok: string | null;
-  /** Parsed AI meal waiting for explicit confirmation. */
+  /** Parsed AI command waiting for explicit confirmation. */
   draft?: AiLogDraft | null;
 };
 
 const todayISO = () => istDateISO();
+const SLOT_VALUES = ["breakfast", "lunch", "snack", "dinner"] as const;
 
 /** Re-validated server-side when the confirmation card posts it back. */
-const aiLogDraftSchema = z.object({
-  items: z.array(mealParseItemSchema).min(1).max(15),
-  slot: z.enum(["breakfast", "lunch", "snack", "dinner"]),
-  date: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
-    .refine((d) => d <= todayISO(), "Cannot log a future day"),
-});
+const aiLogDraftSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("log"),
+    items: z.array(mealParseItemSchema).min(1).max(15),
+    slot: z.enum(SLOT_VALUES),
+    date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+      .refine((d) => d <= todayISO(), "Cannot log a future day"),
+  }),
+  z.object({
+    kind: z.literal("move"),
+    rowId: z.string().uuid(),
+    description: z.string().min(1).max(120),
+    fromSlot: z.enum(SLOT_VALUES),
+    toSlot: z.enum(SLOT_VALUES),
+    date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+      .refine((d) => d <= todayISO(), "Cannot move a future day"),
+  }),
+]);
 
 /** Craving/exra snack: logs it, then re-fits remaining planned slots to the leftover budget. */
 export async function cravingAction(
@@ -172,10 +195,72 @@ export async function cravingAction(
   };
 }
 
+function slotForNow(): MealSlot {
+  const hour = istHour();
+  return hour < 11 ? "breakfast" : hour < 16 ? "lunch" : hour < 19 ? "snack" : "dinner";
+}
+
+function slotLabel(slot: string): string {
+  return slot.charAt(0).toUpperCase() + slot.slice(1);
+}
+
 /**
- * Freeform AI meal logging: "2 roti and dal, plus a mango" → a parsed draft.
- * Nothing is written here; the UI shows the items and only a second,
- * explicitly confirmed request writes the intake rows.
+ * Resolve a move command against today's actual diary rows. The model names
+ * the food; the server decides which row that is, so the model never gets to
+ * choose an arbitrary row id.
+ */
+async function resolveMove(
+  memberId: string,
+  command: MealMoveCommand,
+  date: string,
+): Promise<{ draft: Extract<AiLogDraft, { kind: "move" }> } | { error: string } | { info: string }> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("intake_logs")
+    .select("id, slot, description, kcal")
+    .eq("member_id", memberId)
+    .eq("logged_on", date)
+    .order("created_at");
+  const rows = (data ?? []) as IntakeMatchRow[];
+  const match = findIntakeMatch(rows, command.item, command.fromSlot);
+
+  if (!match) {
+    return {
+      error: `I couldn't find “${command.item}” in today's ${command.fromSlot ?? "diary"}. Check the item's name in the diary and try again.`,
+    };
+  }
+  if ("ambiguous" in match) {
+    return {
+      error: `“${command.item}” matches more than one item: ${match.ambiguous
+        .map((r) => r.description ?? "unnamed")
+        .join("; ")}. Be more specific or use the pencil on the diary row.`,
+    };
+  }
+
+  const row = match.row;
+  if (!SLOT_VALUES.includes(row.slot as (typeof SLOT_VALUES)[number])) {
+    return { error: "That item has an unknown meal slot — edit it from the diary." };
+  }
+  if (row.slot === command.toSlot) {
+    return { info: `“${row.description ?? command.item}” is already in ${slotLabel(row.slot)}.` };
+  }
+
+  return {
+    draft: {
+      kind: "move",
+      rowId: row.id,
+      description: row.description ?? command.item,
+      fromSlot: row.slot as MealSlot,
+      toSlot: command.toSlot,
+      date,
+    },
+  };
+}
+
+/**
+ * Freeform AI meal command: "2 roti and dal" or "move the soya tikki to
+ * breakfast". Parsing never writes; the UI shows a confirmation card and a
+ * second request applies the log or the move.
  */
 export async function aiLogIntakeAction(
   _prev: IntakeActionState,
@@ -194,43 +279,56 @@ export async function aiLogIntakeAction(
   if (!provider) return { error: "No AI provider configured — add one in Settings → AI Providers, or use the craving form to log the calories manually.", ok: null };
   if (!checkRate(`ailog:${profile.id}`, 30, 60 * 60 * 1000)) return { error: rateLimited(30, 60 * 60 * 1000), ok: null };
 
-  let items: MealParseItem[];
+  let command: MealCommand;
   try {
-    const parsed = await chatJson(
+    command = await chatJson(
       provider,
-      mealParseSchema,
+      mealCommandSchema,
       [
-        { role: "system", content: MEAL_PARSE_SYSTEM },
+        { role: "system", content: MEAL_COMMAND_SYSTEM },
         { role: "user", content: text.data },
       ],
       // Reasoning models burn part of the budget before writing JSON, so this
       // needs generous headroom — 900 produced empty completions.
       { maxTokens: 2500, temperature: 0.2, feature: "meal_log" },
     );
-    items = parsed.items;
   } catch (e) {
     return { error: e instanceof ProviderError ? e.message : "Could not parse that — try again.", ok: null };
   }
 
+  if (command.action === "unsupported") {
+    return { error: command.reason, ok: null, draft: null };
+  }
+
+  if (command.action === "move") {
+    const resolved = await resolveMove(profile.id, command, todayISO());
+    if ("error" in resolved) return { error: resolved.error, ok: null, draft: null };
+    if ("info" in resolved) return { error: null, ok: resolved.info, draft: null };
+    return { error: null, ok: null, draft: resolved.draft };
+  }
+
+  const items = command.items;
   const totalKcal = items.reduce((s, i) => s + i.kcal, 0);
   if (totalKcal > 8000) {
     return { error: "That adds up to over 8,000 kcal — double-check the message and try again.", ok: null };
   }
 
-  const hour = istHour();
-  const slot: MealSlot = hour < 11 ? "breakfast" : hour < 16 ? "lunch" : hour < 19 ? "snack" : "dinner";
-
   return {
     error: null,
     ok: null,
-    draft: { items, slot, date: todayISO() },
+    draft: {
+      kind: "log",
+      items,
+      slot: command.slot ?? slotForNow(),
+      date: todayISO(),
+    },
   };
 }
 
 /**
- * Second step of the AI meal log: the confirmation card posts the draft back,
- * the server re-validates it against the same zod schema, and only then are
- * the intake rows written. The model never gets a direct write path.
+ * Second step: the confirmation card posts the draft back, the server
+ * re-validates it against the same zod schema, and only then is the diary
+ * written. The model never gets a direct write path.
  */
 async function confirmAiLog(memberId: string, formData: FormData): Promise<IntakeActionState> {
   const raw = formData.get("draft");
@@ -253,14 +351,44 @@ async function confirmAiLog(memberId: string, formData: FormData): Promise<Intak
       draft: null,
     };
   }
+  const draft = parsed.data;
+  const supabase = await createClient();
 
-  const { items, slot, date } = parsed.data;
-  const totalKcal = items.reduce((s, i) => s + i.kcal, 0);
-  if (totalKcal > 8000) {
-    return { error: "That adds up to over 8,000 kcal — double-check the message and try again.", ok: null, draft: null };
+  if (draft.kind === "move") {
+    const { data: row } = await supabase
+      .from("intake_logs")
+      .select("id, description, slot")
+      .eq("id", draft.rowId)
+      .eq("member_id", memberId)
+      .maybeSingle();
+    if (!row) {
+      return { error: "That item is no longer in your diary — refresh and try again.", ok: null, draft: null };
+    }
+    if (row.slot === draft.toSlot) {
+      return { error: null, ok: `It's already in ${slotLabel(draft.toSlot)}.`, draft: null };
+    }
+
+    const { error } = await supabase
+      .from("intake_logs")
+      .update({ slot: draft.toSlot })
+      .eq("id", draft.rowId)
+      .eq("member_id", memberId);
+    if (error) return { error: error.message, ok: null, draft };
+
+    revalidatePath("/");
+    return {
+      error: null,
+      ok: `Moved “${row.description ?? draft.description}” from ${slotLabel(row.slot)} to ${slotLabel(draft.toSlot)}.`,
+      draft: null,
+    };
   }
 
-  const supabase = await createClient();
+  const { items, slot, date } = draft;
+  const totalKcal = items.reduce((s, i) => s + i.kcal, 0);
+  if (totalKcal > 8000) {
+    return { error: "That adds up to over 8,000 kcal — double-check the message and try again.", ok: null, draft };
+  }
+
   const { error } = await supabase.from("intake_logs").insert(
     items.map((i) => ({
       member_id: memberId,
@@ -275,12 +403,12 @@ async function confirmAiLog(memberId: string, formData: FormData): Promise<Intak
       source: "ai_chat",
     })),
   );
-  if (error) return { error: error.message, ok: null, draft: { items, slot, date } };
+  if (error) return { error: error.message, ok: null, draft };
 
   revalidatePath("/");
   return {
     error: null,
-    ok: `Logged ${items.length} item${items.length > 1 ? "s" : ""} (~${Math.round(totalKcal)} kcal) to ${slot}.`,
+    ok: `Logged ${items.length} item${items.length > 1 ? "s" : ""} (~${Math.round(totalKcal)} kcal) to ${slotLabel(slot)}.`,
     draft: null,
   };
 }
