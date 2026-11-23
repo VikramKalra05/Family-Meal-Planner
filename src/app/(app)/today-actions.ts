@@ -11,13 +11,36 @@ import { istDateISO, istHour } from "@/lib/date";
 import {
   MEAL_PARSE_SYSTEM,
   intakeDescription,
+  mealParseItemSchema,
   mealParseSchema,
   type MealParseItem,
 } from "@/lib/ai/meal-parse";
+import type { MealSlot } from "@/lib/db-types";
 
-export type IntakeActionState = { error: string | null; ok: string | null };
+export interface AiLogDraft {
+  items: MealParseItem[];
+  slot: MealSlot;
+  date: string;
+}
+
+export type IntakeActionState = {
+  error: string | null;
+  ok: string | null;
+  /** Parsed AI meal waiting for explicit confirmation. */
+  draft?: AiLogDraft | null;
+};
 
 const todayISO = () => istDateISO();
+
+/** Re-validated server-side when the confirmation card posts it back. */
+const aiLogDraftSchema = z.object({
+  items: z.array(mealParseItemSchema).min(1).max(15),
+  slot: z.enum(["breakfast", "lunch", "snack", "dinner"]),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+    .refine((d) => d <= todayISO(), "Cannot log a future day"),
+});
 
 /** Craving/exra snack: logs it, then re-fits remaining planned slots to the leftover budget. */
 export async function cravingAction(
@@ -149,12 +172,21 @@ export async function cravingAction(
   };
 }
 
-/** Freeform AI meal logging: "2 roti and dal, plus a mango" → intake rows. */
+/**
+ * Freeform AI meal logging: "2 roti and dal, plus a mango" → a parsed draft.
+ * Nothing is written here; the UI shows the items and only a second,
+ * explicitly confirmed request writes the intake rows.
+ */
 export async function aiLogIntakeAction(
   _prev: IntakeActionState,
   formData: FormData,
 ): Promise<IntakeActionState> {
   const profile = await requireFullProfile();
+  const mode = formData.get("mode");
+
+  if (mode === "cancel") return { error: null, ok: null, draft: null };
+  if (mode === "confirm") return confirmAiLog(profile.id, formData);
+
   const text = z.string().trim().min(2, "Tell me what you ate").max(500).safeParse(formData.get("text"));
   if (!text.success) return { error: text.error.issues[0]?.message ?? "Invalid input", ok: null };
 
@@ -185,15 +217,54 @@ export async function aiLogIntakeAction(
     return { error: "That adds up to over 8,000 kcal — double-check the message and try again.", ok: null };
   }
 
-  const supabase = await createClient();
   const hour = istHour();
-  const slot = hour < 11 ? "breakfast" : hour < 16 ? "lunch" : hour < 19 ? "snack" : "dinner";
-  const today = todayISO();
+  const slot: MealSlot = hour < 11 ? "breakfast" : hour < 16 ? "lunch" : hour < 19 ? "snack" : "dinner";
 
-  await supabase.from("intake_logs").insert(
+  return {
+    error: null,
+    ok: null,
+    draft: { items, slot, date: todayISO() },
+  };
+}
+
+/**
+ * Second step of the AI meal log: the confirmation card posts the draft back,
+ * the server re-validates it against the same zod schema, and only then are
+ * the intake rows written. The model never gets a direct write path.
+ */
+async function confirmAiLog(memberId: string, formData: FormData): Promise<IntakeActionState> {
+  const raw = formData.get("draft");
+  if (typeof raw !== "string") {
+    return { error: "That draft expired — parse the message again.", ok: null, draft: null };
+  }
+
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return { error: "That draft expired — parse the message again.", ok: null, draft: null };
+  }
+
+  const parsed = aiLogDraftSchema.safeParse(json);
+  if (!parsed.success) {
+    return {
+      error: parsed.error.issues[0]?.message ?? "That draft expired — parse the message again.",
+      ok: null,
+      draft: null,
+    };
+  }
+
+  const { items, slot, date } = parsed.data;
+  const totalKcal = items.reduce((s, i) => s + i.kcal, 0);
+  if (totalKcal > 8000) {
+    return { error: "That adds up to over 8,000 kcal — double-check the message and try again.", ok: null, draft: null };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("intake_logs").insert(
     items.map((i) => ({
-      member_id: profile.id,
-      logged_on: today,
+      member_id: memberId,
+      logged_on: date,
       slot,
       description: intakeDescription(i),
       kcal: i.kcal,
@@ -204,8 +275,12 @@ export async function aiLogIntakeAction(
       source: "ai_chat",
     })),
   );
+  if (error) return { error: error.message, ok: null, draft: { items, slot, date } };
 
   revalidatePath("/");
-  const loggedKcal = items.reduce((s, i) => s + i.kcal, 0);
-  return { error: null, ok: `Logged ${items.length} item${items.length > 1 ? "s" : ""} (~${Math.round(loggedKcal)} kcal) from your message.` };
+  return {
+    error: null,
+    ok: `Logged ${items.length} item${items.length > 1 ? "s" : ""} (~${Math.round(totalKcal)} kcal) to ${slot}.`,
+    draft: null,
+  };
 }

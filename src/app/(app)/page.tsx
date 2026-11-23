@@ -323,7 +323,7 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
         </div>
         <div className="rounded-none border-2 border-neutral-900 bg-white p-4 shadow-[4px_4px_0_#111]">
           <h2 className="mb-3 text-sm font-extrabold uppercase tracking-widest text-neutral-500">AI meal log</h2>
-          <AiLogForm />
+          <AiLogForm today={today} />
         </div>
       </section>
 
