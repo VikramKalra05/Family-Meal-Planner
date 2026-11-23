@@ -36,6 +36,7 @@ function toView(set: SetLog, unit: WeightUnit): WorkoutSet {
     plates: (set.plates as { label: string; qty: number }[] | null) ?? null,
     isWarmup: set.is_warmup,
     isPr: set.is_pr,
+    stackPosition: set.stack_position,
   };
 }
 
@@ -82,6 +83,7 @@ export default async function WorkoutPage({ params }: { params: Promise<{ id: st
     repMax: e.rep_max,
     incrementKg: Number(e.increment_kg),
     note: e.notes,
+    equipmentIds: exerciseMap.get(e.exercise_key)?.equipmentIds ?? [],
   }));
 
   const keys = exercises.map((e) => e.key);
@@ -102,6 +104,7 @@ export default async function WorkoutPage({ params }: { params: Promise<{ id: st
       unit={unit}
       barWeight={Number(gym.bar_weight)}
       plates={gym.plate_inventory}
+      machineStacks={gym.machine_stacks ?? []}
       exercises={exercises}
       existingSets={sets.map((s) => toView(s, unit))}
       lastSets={lastSets}

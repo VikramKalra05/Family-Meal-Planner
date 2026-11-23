@@ -11,7 +11,7 @@ import {
 } from "@/lib/gym/data";
 import { addDays, daysBetween, type Goal, type Muscle } from "@/lib/gym/types";
 import { epley1rm, strengthTrendPct } from "@/lib/gym/e1rm";
-import { volumeBand, weeklySetsByMuscle } from "@/lib/gym/progression";
+import { shouldDeload, volumeBand, weeklySetsByMuscle } from "@/lib/gym/progression";
 import { suggestAdaptation } from "@/lib/gym/adapt";
 import { calorieFloorFor } from "@/lib/gym/fuel";
 import { weightTrend, type WeightPoint } from "@/lib/weight";
@@ -268,7 +268,12 @@ export default async function GymProgressPage() {
 
       {/* Strength */}
       <section className="rounded-none border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0_#111]">
-        <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">Estimated 1RM</h2>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">Estimated 1RM</h2>
+          <p className="text-[9px] font-bold uppercase tracking-wide text-neutral-400">
+            Deload? = last two sessions &lt; 95% of prior best
+          </p>
+        </div>
         {series.length === 0 ? (
           <p className="mt-2 text-sm text-neutral-500">Log two sessions of the same lift to see a trend.</p>
         ) : (
@@ -277,6 +282,7 @@ export default async function GymProgressPage() {
               const first = s.points[0].value;
               const lastValue = s.points[s.points.length - 1].value;
               const pct = first > 0 ? Math.round(((lastValue - first) / first) * 1000) / 10 : null;
+              const deload = shouldDeload(s.points.map((p) => p.value));
               return (
                 <div key={s.key} className="border-2 border-neutral-900 bg-amber-50 p-3">
                   <div className="flex items-start justify-between gap-2">
@@ -292,6 +298,11 @@ export default async function GymProgressPage() {
                       </span>
                     )}
                   </div>
+                  {deload && (
+                    <p className="mt-1 text-[10px] font-extrabold uppercase tracking-wide text-red-700">
+                      Deload suggested — last two sessions are below 95% of the prior best
+                    </p>
+                  )}
                   <Sparkline points={s.points} unit="kg" />
                 </div>
               );

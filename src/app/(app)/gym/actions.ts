@@ -12,7 +12,18 @@ import { buildProgram, templateById, type ProgramTemplate } from "@/lib/gym/prog
 import { calorieFloorFor } from "@/lib/gym/fuel";
 import { mergeMeasurement, type MeasurementFields } from "@/lib/gym/measurements";
 import { pickSessionForDate } from "@/lib/gym/sessions";
-import { KG_BARS, LB_BARS, weekdayIndex, EQUIPMENT, MUSCLES, PATTERNS, type PlateDenom, type WeightUnit, clamp } from "@/lib/gym/types";
+import {
+  KG_BARS,
+  LB_BARS,
+  weekdayIndex,
+  EQUIPMENT,
+  MUSCLES,
+  PATTERNS,
+  type MachineStack,
+  type PlateDenom,
+  type WeightUnit,
+  clamp,
+} from "@/lib/gym/types";
 
 export type GymActionState = { error: string | null; ok: string | null };
 
@@ -25,6 +36,11 @@ function parseJson<T>(value: FormDataEntryValue | null, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+/** JSON from a form is untrusted: a non-array must not crash `.filter`. */
+function asArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
 }
 
 const equipmentIds = new Set(GYM_EQUIPMENT.map((e) => e.id));
@@ -173,16 +189,20 @@ export async function saveGymSetup(
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid setup", ok: null };
 
-  const rawEquipment = parseJson<string[]>(formData.get("equipmentIds"), []);
-  const ids = rawEquipment.filter((id) => equipmentIds.has(id));
-  const rawDays = parseJson<number[]>(formData.get("trainingDays"), []);
-  const days = [...new Set(rawDays.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort(
-    (a, b) => a - b,
-  );
+  const rawEquipment = parseJson<unknown>(formData.get("equipmentIds"), []);
+  const ids = asArray<string>(rawEquipment).filter((id) => equipmentIds.has(id));
+  const rawDays = parseJson<unknown>(formData.get("trainingDays"), []);
+  const days = [
+    ...new Set(
+      asArray<number>(rawDays).filter(
+        (d) => Number.isInteger(d) && d >= 0 && d <= 6,
+      ),
+    ),
+  ].sort((a, b) => a - b);
   if (days.length === 0) return { error: "Pick at least one training day", ok: null };
 
-  const rawPlates = parseJson<PlateDenom[]>(formData.get("plates"), []);
-  const plates = rawPlates
+  const rawPlates = parseJson<unknown>(formData.get("plates"), []);
+  const plates = asArray<PlateDenom>(rawPlates)
     .slice(0, 40)
     .filter((p) => p && typeof p.id === "string" && Number.isFinite(Number(p.weight)))
     .map((p) => ({
@@ -192,6 +212,33 @@ export async function saveGymSetup(
       count: clamp(Math.round(Number(p.count) || 0), 0, 40),
       color: typeof p.color === "string" ? p.color : undefined,
     }));
+
+  const rawStacks = parseJson<unknown>(formData.get("machineStacks"), []);
+  const seenStacks = new Set<string>();
+  const machineStacks = asArray<MachineStack>(rawStacks)
+    .slice(0, 20)
+    .map((s) => {
+      const positionCount = clamp(Math.round(Number(s.positionCount) || 0), 2, 60);
+      const calibration = (Array.isArray(s.calibration) ? s.calibration : [])
+        .slice(0, 6)
+        .map((p) => ({
+          position: clamp(Math.round(Number(p.position) || 1), 1, positionCount),
+          kg: Math.max(0, Number(p.kg) || 0),
+        }))
+        .sort((a, b) => a.position - b.position);
+      return {
+        equipmentId: String(s.equipmentId ?? ""),
+        label: String(s.label ?? "").slice(0, 80),
+        positionCount,
+        calibration,
+      };
+    })
+    .filter((s) => {
+      if (!ids.includes(s.equipmentId) || s.calibration.length === 0) return false;
+      if (seenStacks.has(s.equipmentId)) return false;
+      seenStacks.add(s.equipmentId);
+      return true;
+    });
 
   const template = templateById(parsed.data.templateId);
   if (!template) return { error: "Unknown program template", ok: null };
@@ -206,6 +253,7 @@ export async function saveGymSetup(
       unit,
       bar_weight: parsed.data.barWeight,
       plate_inventory: plates,
+      machine_stacks: machineStacks,
       bars,
       equipment_ids: ids,
       training_days: days,

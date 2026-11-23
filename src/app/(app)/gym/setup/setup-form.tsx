@@ -18,12 +18,14 @@ import {
   LB_BARS,
   LB_PLATE_PRESET,
   WEEKDAY_LABELS,
+  type MachineStack,
   type PlateDenom,
   type WeightUnit,
 } from "@/lib/gym/types";
 import { presetPlates } from "@/lib/gym/plates";
 import { saveGymSetup } from "../actions";
 import { SubmitButton } from "@/components/submit-button";
+import { MachineStackEditor } from "./machine-stack-editor";
 
 const PLATE_COLORS: Record<string, string> = {
   red: "#ef4444",
@@ -45,6 +47,7 @@ export interface SetupInitial {
   equipmentIds: string[];
   trainingDays: number[];
   plates: PlateDenom[];
+  machineStacks: MachineStack[];
   templateId: string;
 }
 
@@ -57,6 +60,7 @@ export function SetupForm({ initial }: { initial: SetupInitial }) {
   const [plates, setPlates] = useState<PlateDenom[]>(
     initial.plates.length > 0 ? initial.plates : presetPlates(initial.unit),
   );
+  const [machineStacks, setMachineStacks] = useState<MachineStack[]>(initial.machineStacks);
   const [templateId, setTemplateId] = useState(initial.templateId);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<"all" | EquipmentCategory>("all");
@@ -81,7 +85,9 @@ export function SetupForm({ initial }: { initial: SetupInitial }) {
   const toggle = (id: string) =>
     setEquipmentIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const toggleDay = (day: number) =>
-    setTrainingDays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort()));  function changeUnit(next: WeightUnit) {
+    setTrainingDays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort()));
+
+  function changeUnit(next: WeightUnit) {
     setUnit(next);
     setBarWeight(next === "lb" ? 45 : 20);
     setPlates(presetPlates(next));
@@ -110,6 +116,7 @@ export function SetupForm({ initial }: { initial: SetupInitial }) {
       <input type="hidden" name="equipmentIds" value={JSON.stringify(equipmentIds)} />
       <input type="hidden" name="trainingDays" value={JSON.stringify(trainingDays)} />
       <input type="hidden" name="plates" value={JSON.stringify(plates)} />
+      <input type="hidden" name="machineStacks" value={JSON.stringify(machineStacks)} />
       <input type="hidden" name="templateId" value={templateId} />
 
       {/* ── Equipment ─────────────────────────────────────────────────── */}
@@ -372,9 +379,26 @@ export function SetupForm({ initial }: { initial: SetupInitial }) {
         </div>
       </section>
 
+      {/* ── Machine stacks ─────────────────────────────────────────────── */}
+      <section className="rounded-none border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0_#111]">
+        <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">
+          4. Machine stacks (optional)
+        </h2>
+        <p className="mt-1 text-xs text-neutral-500">
+          Unlabelled pin stacks? Set the bottom and top weight once. The workout then lets you pick
+          a pin position and converts it to weight, recording the position with the set.
+        </p>
+        <MachineStackEditor
+          unit={unit}
+          equipmentIds={equipmentIds}
+          stacks={machineStacks}
+          onChange={setMachineStacks}
+        />
+      </section>
+
       {/* ── Program ───────────────────────────────────────────────────── */}
       <section className="rounded-none border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0_#111]">
-        <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">4. Pick a split</h2>
+        <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">5. Pick a split</h2>
         <p className="mt-1 text-xs text-neutral-500">
           You can change this later. Exercises your equipment can&apos;t support are dropped automatically.
         </p>
@@ -425,6 +449,7 @@ export function SetupForm({ initial }: { initial: SetupInitial }) {
         </SubmitButton>
         <span className="text-[11px] text-neutral-400">
           {equipmentIds.length} equipment · {trainingDays.length} days · {plates.length} plate types
+          {machineStacks.length > 0 ? ` · ${machineStacks.length} stack${machineStacks.length === 1 ? "" : "s"}` : ""}
         </span>
       </div>
     </form>
