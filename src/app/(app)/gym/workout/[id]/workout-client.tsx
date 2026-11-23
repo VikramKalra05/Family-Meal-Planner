@@ -8,8 +8,10 @@ import {
   enqueue,
   flushQueue,
   installAutoFlush,
-  pendingCount,
+  queueSummary,
+  retryFailed,
   subscribeQueue,
+  type QueueSummary,
 } from "@/lib/gym/local-queue";
 import type { PlateDenom, WeightUnit } from "@/lib/gym/types";
 
@@ -123,12 +125,16 @@ export function WorkoutClient({
   });
   const [picker, setPicker] = useState<{ key: string; index: number } | null>(null);
   const [chipsByRow, setChipsByRow] = useState<Record<string, PickedPlate[]>>({});
-  const [pending, setPending] = useState(0);
+  const [queueState, setQueueState] = useState<QueueSummary>({
+    pending: 0,
+    errors: 0,
+    firstError: null,
+  });
   const [banner, setBanner] = useState<string | null>(null);
   const [added, setAdded] = useState("");
 
   useEffect(() => {
-    const unsubscribe = subscribeQueue(setPending);
+    const unsubscribe = subscribeQueue(setQueueState);
     const stop = installAutoFlush();
     void flushQueue();
     return () => {
@@ -234,12 +240,14 @@ export function WorkoutClient({
       data: { ended_at: new Date().toISOString() },
     });
     const result = await flushQueue();
-    const left = await pendingCount();
-    if (result.failed > 0 || left > 0) {
+    const summary = await queueSummary();
+    if (result.failed > 0 || summary.pending > 0 || summary.errors > 0) {
       setBanner(
-        left > 0
-          ? `Saved on this device — ${left} item${left === 1 ? "" : "s"} will sync when the connection is back.`
-          : "The server rejected the last change. Retry from the sync banner.",
+        summary.errors > 0
+          ? `${summary.errors} saved set${summary.errors === 1 ? "" : "s"} rejected by the server — retry from the sync banner.`
+          : summary.pending > 0
+            ? `Saved on this device — ${summary.pending} item${summary.pending === 1 ? "" : "s"} will sync when the connection is back.`
+            : "The server rejected the last change. Retry from the sync banner.",
       );
       return;
     }
@@ -285,10 +293,18 @@ export function WorkoutClient({
         <div className="text-right">
           <p
             className={`inline-block border-2 border-neutral-900 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide ${
-              pending === 0 ? "bg-emerald-300" : "bg-amber-200 nb-blink"
+              queueState.errors > 0
+                ? "bg-red-200"
+                : queueState.pending === 0
+                  ? "bg-emerald-300"
+                  : "bg-amber-200 nb-blink"
             }`}
           >
-            {pending === 0 ? "All sets synced" : `${pending} pending`}
+            {queueState.errors > 0
+              ? `${queueState.errors} sync error${queueState.errors === 1 ? "" : "s"}`
+              : queueState.pending === 0
+                ? "All sets synced"
+                : `${queueState.pending} pending`}
           </p>
           {readOnly ? (
             <p className="mt-1 text-[10px] font-bold uppercase text-neutral-400">Completed</p>
@@ -308,6 +324,22 @@ export function WorkoutClient({
         <p className="border-2 border-neutral-900 bg-amber-200 px-3 py-2 text-xs font-bold shadow-[2px_2px_0_#111]">
           {banner}
         </p>
+      )}
+
+      {queueState.errors > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-2 border-neutral-900 bg-red-100 px-3 py-2 text-xs font-bold shadow-[2px_2px_0_#111]">
+          <span>
+            {queueState.errors} saved set{queueState.errors === 1 ? "" : "s"} rejected by the server
+            {queueState.firstError ? `: ${queueState.firstError}` : "."}
+          </span>
+          <button
+            type="button"
+            onClick={() => void retryFailed()}
+            className="border-2 border-neutral-900 bg-white px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111]"
+          >
+            Retry sync
+          </button>
+        </div>
       )}
 
       {!readOnly && (

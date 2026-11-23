@@ -37,8 +37,21 @@ export interface FlushResult {
 }
 
 const EMPTY: FlushResult = { ok: 0, failed: 0, okIds: [], errors: [] };
-const listeners = new Set<(count: number) => void>();
+const listeners = new Set<(summary: QueueSummary) => void>();
 let flushing: Promise<FlushResult> | null = null;
+
+export interface QueueSummary {
+  pending: number;
+  errors: number;
+  firstError: string | null;
+}
+
+/** Preserve the order things actually happened in. */
+export function sortQueue<T extends { queuedAt: number; id: string }>(items: T[]): T[] {
+  return [...items].sort(
+    (a, b) => a.queuedAt - b.queuedAt || a.id.localeCompare(b.id),
+  );
+}
 
 function hasIdb(): boolean {
   return typeof window !== "undefined" && typeof indexedDB !== "undefined";
@@ -57,12 +70,12 @@ function openDb(): Promise<IDBDatabase> {
 }
 
 async function readQueue(): Promise<QueueItem[]> {
-  if (!hasIdb()) return [...memory];
+  if (!hasIdb()) return sortQueue([...memory]);
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readonly");
     const req = tx.objectStore(STORE).getAll();
-    req.onsuccess = () => resolve((req.result ?? []) as QueueItem[]);
+    req.onsuccess = () => resolve(sortQueue((req.result ?? []) as QueueItem[]));
     req.onerror = () => reject(req.error);
   });
 }
@@ -101,11 +114,19 @@ async function deleteItems(ids: string[]): Promise<void> {
   });
 }
 
+function summarize(items: QueueItem[]): QueueSummary {
+  const failed = items.filter((i) => i.status === "error");
+  return {
+    pending: items.filter((i) => i.status === "pending").length,
+    errors: failed.length,
+    firstError: failed[0]?.error ?? null,
+  };
+}
+
 async function notify(): Promise<void> {
   try {
-    const items = await readQueue();
-    const count = items.filter((i) => i.status === "pending").length;
-    for (const listener of listeners) listener(count);
+    const summary = summarize(await readQueue());
+    for (const listener of listeners) listener(summary);
   } catch {
     // A closed DB or private mode should never break logging.
   }
@@ -125,6 +146,14 @@ export async function pendingCount(): Promise<number> {
   }
 }
 
+export async function queueSummary(): Promise<QueueSummary> {
+  try {
+    return summarize(await readQueue());
+  } catch {
+    return { pending: 0, errors: 0, firstError: null };
+  }
+}
+
 export async function queueItems(): Promise<QueueItem[]> {
   try {
     return await readQueue();
@@ -133,7 +162,20 @@ export async function queueItems(): Promise<QueueItem[]> {
   }
 }
 
-export function subscribeQueue(listener: (count: number) => void): () => void {
+/**
+ * Move rejected items back to pending and try again. Rejected writes are kept
+ * on the device so a transient server error never loses a set.
+ */
+export async function retryFailed(): Promise<void> {
+  const items = await readQueue();
+  for (const item of items.filter((i) => i.status === "error")) {
+    await writeItem({ ...item, status: "pending", error: undefined });
+  }
+  await notify();
+  void flushQueue();
+}
+
+export function subscribeQueue(listener: (summary: QueueSummary) => void): () => void {
   listeners.add(listener);
   void notify();
   return () => listeners.delete(listener);

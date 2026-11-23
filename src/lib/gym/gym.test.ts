@@ -18,6 +18,7 @@ import { shouldDeload, suggestNextLoad, weeklySetsByMuscle } from "./progression
 import { computeStreak, isTrainingDay } from "./streak";
 import { completedSessionDates, pickSessionForDate } from "./sessions";
 import { mergeMeasurement } from "./measurements";
+import { sortQueue } from "./local-queue";
 import {
   applyCalorieAdjustment,
   calorieFloorFor,
@@ -252,6 +253,16 @@ describe("measurements", () => {
 
   it("fills blanks with null when there is no existing row", () => {
     expect(mergeMeasurement(null, { waist: 80 }).chest_cm).toBeNull();
+  });
+});
+
+describe("offline queue ordering", () => {
+  it("replays in queuedAt order, not UUID order", () => {
+    const items = [
+      { id: "ffffffff", queuedAt: 2 },
+      { id: "00000000", queuedAt: 1 },
+    ];
+    expect(sortQueue(items).map((i) => i.id)).toEqual(["00000000", "ffffffff"]);
   });
 });
 
