@@ -12,7 +12,7 @@ import { buildProgram, templateById, type ProgramTemplate } from "@/lib/gym/prog
 import { calorieFloorFor } from "@/lib/gym/fuel";
 import { mergeMeasurement, type MeasurementFields } from "@/lib/gym/measurements";
 import { pickSessionForDate } from "@/lib/gym/sessions";
-import { KG_BARS, LB_BARS, type PlateDenom, type WeightUnit, clamp } from "@/lib/gym/types";
+import { KG_BARS, LB_BARS, weekdayIndex, type PlateDenom, type WeightUnit, clamp } from "@/lib/gym/types";
 
 export type GymActionState = { error: string | null; ok: string | null };
 
@@ -590,13 +590,36 @@ export async function useStreakFreeze(formData: FormData): Promise<void> {
   const profile = await requireFullProfile();
   const date = isoDate.safeParse(formData.get("date"));
   if (!date.success) return;
+
+  // A freeze repairs a *past, scheduled, missed* day. Future/rest/completed
+  // days must not burn the monthly freeze.
+  const today = istDateISO();
+  if (date.data >= today) return;
+
+  const supabase = await createClient();
+  const { data: gym } = await supabase
+    .from("gyms")
+    .select("training_days")
+    .eq("member_id", profile.id)
+    .maybeSingle();
+  const scheduled = (gym?.training_days ?? []) as number[];
+  if (!scheduled.includes(weekdayIndex(date.data))) return;
+
+  const { data: completed } = await supabase
+    .from("workout_sessions")
+    .select("id")
+    .eq("member_id", profile.id)
+    .eq("session_date", date.data)
+    .eq("status", "completed")
+    .maybeSingle();
+  if (completed) return;
+
   const month = date.data.slice(0, 7);
   const [year, monthNumber] = month.split("-").map(Number);
   const nextMonth =
     monthNumber === 12
       ? `${year + 1}-01-01`
       : `${year}-${String(monthNumber + 1).padStart(2, "0")}-01`;
-  const supabase = await createClient();
   const { data: existing } = await supabase
     .from("streak_freezes")
     .select("id")
@@ -607,6 +630,7 @@ export async function useStreakFreeze(formData: FormData): Promise<void> {
   if ((existing ?? []).length > 0) return; // one per calendar month
   await supabase.from("streak_freezes").insert({ member_id: profile.id, used_on: date.data });
   revalidatePath("/gym");
+  revalidatePath("/gym/history");
 }
 
 // ── Custom exercises ────────────────────────────────────────────────────────
