@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { istDateISO, istTimeHHMM, formatIstDate } from "@/lib/date";
 import { mondayOf } from "@/lib/planner";
 import { weightTrend } from "@/lib/weight";
+import { getGymDayTargets } from "@/lib/gym/data";
 import { memberLabels } from "./labels";
 
 /**
@@ -41,7 +42,7 @@ export async function buildContextSnapshot(profile: Profile): Promise<Record<str
   const today = istDateISO();
   const weekStart = mondayOf(today);
 
-  const [membersRes, entriesRes, intakeRes, pantryRes, weightRes, unreadRes] = await Promise.all([
+  const [membersRes, entriesRes, intakeRes, pantryRes, weightRes, unreadRes, dayTargets] = await Promise.all([
     supabase
       .from("profiles")
       .select("id, display_name, role, diet_type, allergies, targets_cache")
@@ -75,9 +76,10 @@ export async function buildContextSnapshot(profile: Profile): Promise<Record<str
       .or(`to_member.is.null,to_member.eq.${profile.id}`)
       .is("read_at", null)
       .neq("from_member", profile.id),
+    getGymDayTargets(profile, today),
   ]);
 
-  const targets = profile.targets_cache?.targets ?? null;
+  const targets = dayTargets;
 
   type EntryRow = {
     entry_date: string;

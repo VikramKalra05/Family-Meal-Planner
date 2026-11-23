@@ -14,6 +14,7 @@ import {
   type SlotKey,
 } from "@/lib/planner";
 import { loadPlanData, loadPantry } from "@/lib/plan-data";
+import { getGymDayTargets } from "@/lib/gym/data";
 import { calculateTargets } from "@/lib/nutrition/engine";
 import { ageFromDob } from "@/lib/age";
 import { healthTags } from "@/lib/nutrition/health";
@@ -140,7 +141,7 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
       );
       const intake = intakeRes.data ?? [];
       const eaten = intake.reduce((s, l) => s + Number(l.kcal), 0);
-      const targets = profile.targets_cache?.targets ?? null;
+      const targets = await getGymDayTargets(profile, today);
       return {
         ok: true,
         message: "Checked today's plan and intake",
@@ -201,7 +202,7 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
         fiber_g: l.fiber_g == null ? null : Math.round(Number(l.fiber_g)),
         source: l.source,
       }));
-      const targets = profile.targets_cache?.targets ?? null;
+      const targets = await getGymDayTargets(profile, date);
       const sum = (key: "kcal" | "protein_g" | "carbs_g" | "fat_g" | "fiber_g") =>
         Math.round(items.reduce((s, i) => s + Number(i[key] ?? 0), 0));
       return {
@@ -232,7 +233,7 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
         .eq("member_id", profile.id)
         .gte("logged_on", since)
         .order("logged_on");
-      const targets = profile.targets_cache?.targets ?? null;
+      const targets = await getGymDayTargets(profile, istDateISO());
       const byDay = new Map<string, { kcal: number; protein: number; carbs: number; fat: number; fiber: number }>();
       for (const row of data ?? []) {
         const d = byDay.get(row.logged_on) ?? { kcal: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 };
@@ -243,6 +244,20 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
         d.fiber += Number(row.fiber_g ?? 0);
         byDay.set(row.logged_on, d);
       }
+      const perDay = await Promise.all(
+        [...byDay.entries()].map(async ([day, v]) => {
+          const dayTarget = await getGymDayTargets(profile, day);
+          return {
+            day,
+            kcal: Math.round(v.kcal),
+            protein_g: Math.round(v.protein),
+            carbs_g: Math.round(v.carbs),
+            fat_g: Math.round(v.fat),
+            fiber_g: Math.round(v.fiber),
+            target_kcal: dayTarget?.kcal ?? null,
+          };
+        }),
+      );
       return {
         ok: true,
         message: `Checked intake for the last ${days} days`,
@@ -250,14 +265,7 @@ export async function executeReadAction(action: AssistantAction, profile: Profil
           days,
           target_kcal: targets?.kcal ?? null,
           target_protein_g: targets?.proteinG ?? null,
-          per_day: [...byDay.entries()].map(([day, v]) => ({
-            day,
-            kcal: Math.round(v.kcal),
-            protein_g: Math.round(v.protein),
-            carbs_g: Math.round(v.carbs),
-            fat_g: Math.round(v.fat),
-            fiber_g: Math.round(v.fiber),
-          })),
+          per_day: perDay,
         },
       };
     }

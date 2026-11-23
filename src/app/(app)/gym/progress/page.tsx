@@ -13,6 +13,7 @@ import { addDays, daysBetween, type Goal, type Muscle } from "@/lib/gym/types";
 import { epley1rm, strengthTrendPct } from "@/lib/gym/e1rm";
 import { volumeBand, weeklySetsByMuscle } from "@/lib/gym/progression";
 import { suggestAdaptation } from "@/lib/gym/adapt";
+import { calorieFloorFor } from "@/lib/gym/fuel";
 import { weightTrend, type WeightPoint } from "@/lib/weight";
 import type { AdaptiveAdjustment } from "@/lib/db-types";
 import { applyAdaptation, deleteMeasurement, deleteProgressPhoto, resetAdaptation } from "../actions";
@@ -138,6 +139,7 @@ export default async function GymProgressPage() {
     .filter((m) => m.waist_cm != null)
     .map((m) => ({ date: m.measured_on, value: Number(m.waist_cm) }));
   const latest = measurements[0];
+  const measurementSeed = measurements.find((m) => m.measured_on === today) ?? latest ?? null;
   const oldestWaist = waistPoints.find((p) => daysBetween(p.date, today) >= 14);
   const latestWaist = waistPoints.at(-1);
   const waistDelta =
@@ -153,6 +155,9 @@ export default async function GymProgressPage() {
   const completedLast21 = sessions.filter(
     (s) => s.status === "completed" && s.session_date >= addDays(today, -21),
   ).length;
+  const floorKcal = calorieFloorFor(profile.sex);
+  const baseKcal = profile.targets_cache?.targets.kcal ?? null;
+  const minAdjustmentKcal = baseKcal != null ? Math.max(-400, floorKcal - baseKcal) : -400;
   const suggestion = suggestAdaptation({
     goal: (profile.goal ?? "maintenance") as Goal,
     weightKg: latestWeight ?? 0,
@@ -162,6 +167,7 @@ export default async function GymProgressPage() {
     weightLogs: weightPoints.length,
     sessions: completedLast21,
     currentAdjustmentKcal: profile.calorie_adjustment_kcal ?? 0,
+    minAdjustmentKcal,
   });
   const adaptationHistory = (adaptationRes.data ?? []) as AdaptiveAdjustment[];
 
@@ -252,7 +258,7 @@ export default async function GymProgressPage() {
                 <span className="truncate">{a.reason}</span>
                 <span className="shrink-0 font-extrabold">
                   {a.delta_kcal > 0 ? "+" : ""}
-                  {a.delta_kcal} → {a.total_kcal}
+                  {a.delta_kcal} → {a.total_kcal} kcal offset
                 </span>
               </li>
             ))}
@@ -366,7 +372,22 @@ export default async function GymProgressPage() {
               <Sparkline points={waistPoints.slice(-12)} unit="cm" />
             </div>
           )}
-          <MeasurementForm today={today} />
+          <MeasurementForm
+            today={today}
+            initial={
+              measurementSeed
+                ? {
+                    waist: measurementSeed.waist_cm,
+                    chest: measurementSeed.chest_cm,
+                    arm: measurementSeed.arm_cm,
+                    thigh: measurementSeed.thigh_cm,
+                    hip: measurementSeed.hip_cm,
+                    neck: measurementSeed.neck_cm,
+                    notes: measurementSeed.notes,
+                  }
+                : null
+            }
+          />
         </div>
 
         <div className="rounded-none border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0_#111]">
@@ -381,7 +402,7 @@ export default async function GymProgressPage() {
                     <img src={p.url} alt={`${p.pose} progress ${p.taken_on}`} className="aspect-[3/4] w-full object-cover" />
                   ) : (
                     <div className="flex aspect-[3/4] items-center justify-center text-[10px] text-neutral-400">
-                      link expired
+                      unavailable
                     </div>
                   )}
                   <div className="flex items-center justify-between border-t-2 border-neutral-900 px-1 py-0.5">

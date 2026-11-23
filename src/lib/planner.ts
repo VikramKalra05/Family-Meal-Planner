@@ -40,6 +40,8 @@ export interface PlannerMember {
   diet: "veg" | "egg" | "non_veg";
   allergies: string[];
   targets: NutrientTargets;
+  /** Hard daily calorie floor (engine safety floor). */
+  floorKcal?: number;
   /** Per-date targets when training-day carb cycling is active. */
   targetsByDate?: Record<string, NutrientTargets>;
 }

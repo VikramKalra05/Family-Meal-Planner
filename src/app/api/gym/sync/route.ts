@@ -47,7 +47,11 @@ const sessionPayload = z.object({
 
 const mutation = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set_upsert"), id: z.string().uuid(), data: setPayload }),
-  z.object({ kind: z.literal("set_delete"), id: z.string().uuid() }),
+  z.object({
+    kind: z.literal("set_delete"),
+    id: z.string().uuid(),
+    data: z.object({ client_updated_at: z.string().max(40).optional() }).optional(),
+  }),
   z.object({ kind: z.literal("session_upsert"), id: z.string().uuid(), data: sessionPayload }),
   z.object({
     kind: z.literal("session_complete"),
@@ -104,6 +108,28 @@ export async function POST(request: Request) {
     return owns;
   }
 
+  const ownedProgramDays = new Map<string, boolean>();
+  async function ownsProgramDay(dayId: string): Promise<boolean> {
+    const cached = ownedProgramDays.get(dayId);
+    if (cached != null) return cached;
+    const { data } = await supabase
+      .from("program_days")
+      .select("id, programs!inner(member_id)")
+      .eq("id", dayId)
+      .eq("programs.member_id", userId)
+      .maybeSingle();
+    const owns = Boolean(data);
+    ownedProgramDays.set(dayId, owns);
+    return owns;
+  }
+
+  function isStale(existing: string | null | undefined, incoming: string | undefined): boolean {
+    if (!existing || !incoming) return false;
+    const existingTs = Date.parse(existing);
+    const incomingTs = Date.parse(incoming);
+    return Number.isFinite(existingTs) && Number.isFinite(incomingTs) && existingTs > incomingTs;
+  }
+
   const results: Result[] = [];
 
   for (const m of parsed.data.mutations) {
@@ -111,6 +137,18 @@ export async function POST(request: Request) {
       if (m.kind === "set_upsert") {
         if (!(await ownsSession(m.data.session_id))) {
           results.push({ id: m.id, ok: false, error: "Unknown session" });
+          continue;
+        }
+        // Last-write-wins with timestamps: a stale queued set must not
+        // overwrite a newer edit or resurrect a newer delete.
+        const { data: existing } = await supabase
+          .from("set_logs")
+          .select("client_updated_at")
+          .eq("id", m.id)
+          .eq("member_id", userId)
+          .maybeSingle();
+        if (existing && isStale(existing.client_updated_at, m.data.client_updated_at)) {
+          results.push({ id: m.id, ok: true });
           continue;
         }
         const { error } = await supabase.from("set_logs").upsert(
@@ -137,13 +175,53 @@ export async function POST(request: Request) {
         );
         results.push(error ? { id: m.id, ok: false, error: error.message } : { id: m.id, ok: true });
       } else if (m.kind === "set_delete") {
+        const { data: existing } = await supabase
+          .from("set_logs")
+          .select("client_updated_at")
+          .eq("id", m.id)
+          .eq("member_id", userId)
+          .maybeSingle();
+        if (existing && isStale(existing.client_updated_at, m.data?.client_updated_at)) {
+          results.push({ id: m.id, ok: true });
+          continue;
+        }
         const { error } = await supabase
           .from("set_logs")
-          .update({ deleted_at: new Date().toISOString() })
+          .update({
+            deleted_at: new Date().toISOString(),
+            client_updated_at: m.data?.client_updated_at ?? new Date().toISOString(),
+          })
           .eq("id", m.id)
           .eq("member_id", userId);
         results.push(error ? { id: m.id, ok: false, error: error.message } : { id: m.id, ok: true });
       } else if (m.kind === "session_upsert") {
+        if (m.data.program_day_id && !(await ownsProgramDay(m.data.program_day_id))) {
+          results.push({ id: m.id, ok: false, error: "Unknown program day" });
+          continue;
+        }
+        const { data: existing } = await supabase
+          .from("workout_sessions")
+          .select("client_updated_at")
+          .eq("id", m.id)
+          .eq("member_id", userId)
+          .maybeSingle();
+        if (existing && isStale(existing.client_updated_at, m.data.client_updated_at)) {
+          results.push({ id: m.id, ok: true });
+          continue;
+        }
+        // One live session per member/day, even from an offline queue.
+        const { data: sameDay } = await supabase
+          .from("workout_sessions")
+          .select("id")
+          .eq("member_id", userId)
+          .eq("session_date", m.data.session_date)
+          .neq("id", m.id)
+          .neq("status", "skipped")
+          .maybeSingle();
+        if (sameDay) {
+          results.push({ id: m.id, ok: false, error: "Another session already exists for that day" });
+          continue;
+        }
         const { error } = await supabase.from("workout_sessions").upsert(
           {
             id: m.id,

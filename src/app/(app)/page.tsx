@@ -9,7 +9,7 @@ import { formatIstDate, istDateISO } from "@/lib/date";
 import { WeighInReminder } from "@/components/weigh-in-reminder";
 import { SubmitButton } from "@/components/submit-button";
 import { getGymToday } from "@/lib/gym/data";
-import { startSession } from "./gym/actions";
+import { markTodayDone, startSession } from "./gym/actions";
 import { IntakeDiary } from "./intake-diary";
 import { toIntakeItem } from "@/lib/intake";
 
@@ -187,6 +187,18 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
               >
                 {gymToday.gym ? "Open program" : "Set up gym"} →
               </Link>
+            )}
+            {gymToday.programDay && gymToday.session?.status !== "completed" && (
+              <form action={markTodayDone}>
+                <input type="hidden" name="date" value={today} />
+                <input type="hidden" name="programDayId" value={gymToday.programDay.id} />
+                <SubmitButton
+                  pendingText="Marking…"
+                  className="rounded-none border-2 border-neutral-900 bg-white px-4 py-2 text-xs font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] nb-press"
+                >
+                  ✓ Mark done
+                </SubmitButton>
+              </form>
             )}
           </div>
         </div>

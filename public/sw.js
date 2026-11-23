@@ -105,6 +105,11 @@ async function flushGymQueue() {
     req.onerror = () => reject(req.error);
   }).catch(() => []);
   if (!items.length) return;
+  // IndexedDB returns records by key (UUID), not insertion order — a delete
+  // must never overtake the upsert it refers to.
+  items.sort(
+    (a, b) => (a.queuedAt || 0) - (b.queuedAt || 0) || String(a.id).localeCompare(String(b.id)),
+  );
 
   let response;
   try {

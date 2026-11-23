@@ -13,13 +13,43 @@ import {
   totalFromPlates,
   warmupRamp,
 } from "./plates";
-import { bestE1rm, epley1rm, isPr, pctChange, totalVolume } from "./e1rm";
+import { bestE1rm, epley1rm, isPr, pctChange, strengthTrendPct, totalVolume } from "./e1rm";
 import { shouldDeload, suggestNextLoad, weeklySetsByMuscle } from "./progression";
+import { PROGRAM_TEMPLATES, availableExercises, buildProgram } from "./program";
+import { SEED_EXERCISES } from "@/data/seed-exercises";
 import { computeStreak, isTrainingDay } from "./streak";
-import { dayFuel, trainingDatesForWeek, weekTargets, weeklyKcal } from "./fuel";
+import { completedSessionDates, pickSessionForDate } from "./sessions";
+import { mergeMeasurement } from "./measurements";
+import { sortQueue } from "./local-queue";
+import {
+  applyCalorieAdjustment,
+  calorieFloorFor,
+  dayFuel,
+  trainingDatesForWeek,
+  weekTargets,
+  weeklyKcal,
+} from "./fuel";
 import { suggestAdaptation } from "./adapt";
+import { CALORIE_FLOORS } from "@/lib/nutrition/types";
 
 const baseTargets = { kcal: 2000, proteinG: 150, carbsG: 200, fatG: 60, fiberG: 30 };
+
+describe("program builder", () => {
+  it("treats zero equipment as bodyweight-only", () => {
+    const template = PROGRAM_TEMPLATES.find((t) => t.id === "full_body_3")!;
+    const built = buildProgram(template, []);
+    expect(built.days).toHaveLength(3);
+    for (const day of built.days) {
+      expect(day.exercises.length).toBeGreaterThan(0);
+      for (const exercise of day.exercises) {
+        const seed = SEED_EXERCISES.find((s) => s.key === exercise.exerciseKey);
+        expect(seed).toBeTruthy();
+        expect(seed!.equipmentIds).toHaveLength(0);
+      }
+    }
+    expect(availableExercises([]).every((e) => e.equipmentIds.length === 0)).toBe(true);
+  });
+});
 
 describe("plate solver", () => {
   it("builds an exact 82.5 kg bar", () => {
@@ -111,6 +141,13 @@ describe("e1RM + volume", () => {
     expect(isPr(80, 82.5)).toBe(true);
     expect(pctChange(100, 105)).toBe(5);
     expect(pctChange(null, 105)).toBeNull();
+  });
+
+  it("smooths the strength trend against one noisy session", () => {
+    expect(strengthTrendPct([100, 100, 100, 100, 80])).toBe(0);
+    expect(strengthTrendPct([100, 105, 110])).toBe(7.5);
+    expect(strengthTrendPct([100, 100, 100, 110, 110])).toBe(10);
+    expect(strengthTrendPct([100, 100])).toBeNull();
   });
 });
 
@@ -221,6 +258,87 @@ describe("streak", () => {
   });
 });
 
+describe("measurements", () => {
+  const existing = {
+    waist_cm: 80,
+    chest_cm: 100,
+    arm_cm: 35,
+    thigh_cm: 55,
+    hip_cm: 95,
+    neck_cm: 38,
+    notes: "morning, empty stomach",
+  };
+
+  it("keeps previous fields when a later save leaves them blank", () => {
+    const merged = mergeMeasurement(existing, { waist: 79 });
+    expect(merged.waist_cm).toBe(79);
+    expect(merged.chest_cm).toBe(100);
+    expect(merged.arm_cm).toBe(35);
+    expect(merged.notes).toBe("morning, empty stomach");
+  });
+
+  it("fills blanks with null when there is no existing row", () => {
+    expect(mergeMeasurement(null, { waist: 80 }).chest_cm).toBeNull();
+  });
+});
+
+describe("offline queue ordering", () => {
+  it("replays in queuedAt order, not UUID order", () => {
+    const items = [
+      { id: "ffffffff", queuedAt: 2 },
+      { id: "00000000", queuedAt: 1 },
+    ];
+    expect(sortQueue(items).map((i) => i.id)).toEqual(["00000000", "ffffffff"]);
+  });
+});
+
+describe("sessions", () => {
+  const session = (
+    id: string,
+    status: "in_progress" | "completed" | "skipped",
+    created: string,
+    date = "2026-11-19",
+  ) => ({ id, session_date: date, status, created_at: created });
+
+  it("prefers an open session over a skipped one on the same day", () => {
+    const picked = pickSessionForDate(
+      [
+        session("skip", "skipped", "2026-11-19T06:00:00Z"),
+        session("open", "in_progress", "2026-11-19T07:00:00Z"),
+        session("done", "completed", "2026-11-19T05:00:00Z"),
+      ],
+      "2026-11-19",
+    );
+    expect(picked?.id).toBe("open");
+  });
+
+  it("falls back to completed, then skipped", () => {
+    expect(
+      pickSessionForDate(
+        [
+          session("skip", "skipped", "2026-11-19T06:00:00Z"),
+          session("done", "completed", "2026-11-19T05:00:00Z"),
+        ],
+        "2026-11-19",
+      )?.id,
+    ).toBe("done");
+    expect(
+      pickSessionForDate([session("skip", "skipped", "2026-11-19T06:00:00Z")], "2026-11-19")?.id,
+    ).toBe("skip");
+    expect(pickSessionForDate([], "2026-11-19")).toBeNull();
+  });
+
+  it("counts only completed dates toward the streak", () => {
+    expect(
+      completedSessionDates([
+        session("a", "completed", "2026-11-17T06:00:00Z", "2026-11-17"),
+        session("b", "in_progress", "2026-11-18T06:00:00Z", "2026-11-18"),
+        session("c", "skipped", "2026-11-19T06:00:00Z", "2026-11-19"),
+      ]),
+    ).toEqual(["2026-11-17"]);
+  });
+});
+
 describe("fuel cycling", () => {
   it("is weekly-neutral at 4 training days", () => {
     const t = dayFuel(baseTargets, { isTrainingDay: true, trainingDaysPerWeek: 4 });
@@ -253,6 +371,28 @@ describe("fuel cycling", () => {
   it("handles date helpers at month boundaries", () => {
     expect(addDays("2026-11-30", 1)).toBe("2026-12-01");
     expect(weekdayIndex("2026-11-16")).toBe(0);
+  });
+
+  it("clamps the adaptive offset at the calorie safety floor", () => {
+    const cut = applyCalorieAdjustment(
+      { ...baseTargets, kcal: 1200, carbsG: 120 },
+      -400,
+      CALORIE_FLOORS.female,
+    );
+    expect(cut.kcal).toBe(1200);
+    expect(cut.carbsG).toBe(120);
+    expect(calorieFloorFor(null)).toBe(1200);
+    expect(calorieFloorFor("male")).toBe(1500);
+  });
+
+  it("clamps rest-day carb cycling at the same floor", () => {
+    const rest = dayFuel(
+      { ...baseTargets, kcal: 1200, carbsG: 120 },
+      { isTrainingDay: false, trainingDaysPerWeek: 6, floorKcal: 1200 },
+    );
+    expect(rest.kcal).toBe(1200);
+    expect(rest.deltaKcal).toBe(0);
+    expect(rest.deltaCarbsG).toBe(0);
   });
 });
 
@@ -292,6 +432,20 @@ describe("adaptive loop", () => {
       strengthTrendPct: 0,
     });
     expect(s.action).toBe("decrease");
+  });
+
+  it("holds instead of cutting below the safety floor", () => {
+    const s = suggestAdaptation({
+      ...base,
+      goal: "weight_loss",
+      weightTrendPerWeek: -0.05,
+      strengthTrendPct: 0,
+      currentAdjustmentKcal: -400,
+      minAdjustmentKcal: -400,
+    });
+    expect(s.action).toBe("hold");
+    expect(s.deltaKcal).toBe(0);
+    expect(s.reason).toContain("safety floor");
   });
 
   it("eases a cut that is too fast or costing strength", () => {

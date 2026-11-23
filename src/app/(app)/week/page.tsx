@@ -5,7 +5,7 @@ import { loadPlanData } from "@/lib/plan-data";
 import { mondayOf, SLOT_KEYS } from "@/lib/planner";
 import { formatIstDate, istDateISO } from "@/lib/date";
 import { getGym } from "@/lib/gym/data";
-import { applyCalorieAdjustment, dayFuel } from "@/lib/gym/fuel";
+import { applyCalorieAdjustment, calorieFloorFor, dayFuel } from "@/lib/gym/fuel";
 import { weekdayIndex } from "@/lib/gym/types";
 import { generateWeekAction, removeEntryAction, setEntryStatusAction } from "./actions";
 import { SubmitButton } from "@/components/submit-button";
@@ -100,10 +100,15 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
   const hasPlan = !!planRow && rows.length > 0;
   const trainingDays = viewGym?.training_days ?? [];
   // `loadPlanData` already applied each member's adaptive offset.
+  const floorKcal = viewMember?.floorKcal ?? calorieFloorFor(profile.sex);
   const baseTargets =
     viewMember?.targets ??
     (profile.targets_cache
-      ? applyCalorieAdjustment(profile.targets_cache.targets, profile.calorie_adjustment_kcal ?? 0)
+      ? applyCalorieAdjustment(
+          profile.targets_cache.targets,
+          profile.calorie_adjustment_kcal ?? 0,
+          floorKcal,
+        )
       : null);
   const targetKcal = baseTargets?.kcal ?? null;
   const targetFor = (date: string): number | null =>
@@ -111,6 +116,7 @@ export default async function WeekPage({ searchParams }: PageProps<"/week">) {
       ? dayFuel(baseTargets, {
           isTrainingDay: trainingDays.includes(weekdayIndex(date)),
           trainingDaysPerWeek: trainingDays.length,
+          floorKcal,
         }).kcal
       : null;
   const dayTotals = days.map((date) => {

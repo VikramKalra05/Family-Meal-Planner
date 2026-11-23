@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { requireFullProfile } from "@/lib/profile";
-import { getActiveProgram, getGym, getRecentSessions, getSetsForSessions, getStreakFreezes } from "@/lib/gym/data";
+import { getGym, getProgramDayNames, getRecentSessions, getSetsForSessions, getStreakFreezes } from "@/lib/gym/data";
 import { addDays, weekdayIndex } from "@/lib/gym/types";
 import { istDateISO } from "@/lib/date";
 import { computeStreak } from "@/lib/gym/streak";
+import { completedSessionDates } from "@/lib/gym/sessions";
 import type { SetLog } from "@/lib/db-types";
 
 export const instant = false;
@@ -11,9 +12,9 @@ export const instant = false;
 export default async function GymHistoryPage() {
   const profile = await requireFullProfile();
   const today = istDateISO();
-  const [sessions, program, gym, freezes] = await Promise.all([
+  const [sessions, dayNames, gym, freezes] = await Promise.all([
     getRecentSessions(profile.id, 80),
-    getActiveProgram(profile.id),
+    getProgramDayNames(profile.id),
     getGym(profile.id),
     getStreakFreezes(profile.id),
   ]);
@@ -26,7 +27,7 @@ export default async function GymHistoryPage() {
   }
 
   const streak = computeStreak({
-    sessionDates: sessions.filter((s) => s.status !== "skipped").map((s) => s.session_date),
+    sessionDates: completedSessionDates(sessions),
     scheduledDays: gym?.training_days ?? [],
     today,
     freezes: freezes.map((f) => f.used_on),
@@ -79,6 +80,7 @@ export default async function GymHistoryPage() {
           <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">Last 12 weeks</h2>
           <div className="flex items-center gap-2 text-[9px] font-extrabold uppercase text-neutral-400">
             <span className="h-3 w-3 border border-neutral-900 bg-emerald-400" /> done
+            <span className="h-3 w-3 border border-neutral-900 bg-amber-200" /> in progress
             <span className="h-3 w-3 border border-neutral-900 bg-red-200" /> missed
             <span className="h-3 w-3 border border-neutral-900 bg-neutral-100" /> rest
           </div>
@@ -93,15 +95,17 @@ export default async function GymHistoryPage() {
               const frozen = frozenDays.has(date);
               const cls = future
                 ? "bg-transparent border-neutral-200"
-                : done || started
+                : done
                   ? "bg-emerald-400 border-neutral-900"
-                  : frozen
-                    ? "bg-amber-300 border-neutral-900"
-                    : scheduled
-                      ? date === today
-                        ? "bg-yellow-200 border-neutral-900"
-                        : "bg-red-200 border-neutral-900"
-                      : "bg-neutral-100 border-neutral-200";
+                  : started
+                    ? "bg-amber-200 border-neutral-900"
+                    : frozen
+                      ? "bg-amber-300 border-neutral-900"
+                      : scheduled
+                        ? date === today
+                          ? "bg-yellow-200 border-neutral-900"
+                          : "bg-red-200 border-neutral-900"
+                        : "bg-neutral-100 border-neutral-200";
               return (
                 <span
                   key={date}
@@ -121,7 +125,9 @@ export default async function GymHistoryPage() {
           </p>
         )}
         {sessions.map((s) => {
-          const day = program?.days.find((d) => d.id === s.program_day_id);
+          const dayName = s.program_day_id
+            ? (dayNames.get(s.program_day_id) ?? "Workout")
+            : "Workout";
           const sessionSets = setsBySession.get(s.id) ?? [];
           const isOpen = s.status === "in_progress";
           return (
@@ -132,7 +138,7 @@ export default async function GymHistoryPage() {
             >
               <div>
                 <p className="text-sm font-extrabold">
-                  {day?.name ?? "Workout"}{" "}
+                  {dayName}{" "}
                   <span className="font-medium text-neutral-400">
                     ·{" "}
                     {new Date(`${s.session_date}T00:00:00Z`).toLocaleDateString("en-IN", {

@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/db-types";
 import type { PlannerMember, PlannerRecipe, RecipeItemsInfo } from "@/lib/planner";
 import type { NutrientTargets } from "@/lib/nutrition/types";
-import { applyCalorieAdjustment } from "@/lib/gym/fuel";
+import { applyCalorieAdjustment, calorieFloorFor } from "@/lib/gym/fuel";
 
 export interface PlanEntryRow {
   id: string;
@@ -91,9 +91,11 @@ export async function loadPlanData(
       name: m.display_name,
       diet: m.diet_type,
       allergies: m.allergies ?? [],
+      floorKcal: calorieFloorFor(m.sex),
       targets: applyCalorieAdjustment(
         m.targets_cache!.targets as NutrientTargets,
         m.calorie_adjustment_kcal ?? 0,
+        calorieFloorFor(m.sex),
       ),
     }));
 

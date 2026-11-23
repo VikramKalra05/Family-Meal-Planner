@@ -24,9 +24,11 @@ import type {
 } from "@/lib/db-types";
 import type { NutrientTargets } from "@/lib/nutrition/types";
 import type { Profile } from "@/lib/db-types";
-import { applyCalorieAdjustment, dayFuel, type DayFuel } from "./fuel";
+import { applyCalorieAdjustment, calorieFloorFor, dayFuel, type DayFuel } from "./fuel";
 import { availableExercises, programDayForDate } from "./program";
 import { computeStreak, type StreakResult } from "./streak";
+import { completedSessionDates, pickSessionForDate } from "./sessions";
+import { epley1rm } from "./e1rm";
 import { weekdayIndex } from "./types";
 import { SEED_EXERCISES, type ExerciseView } from "@/data/seed-exercises";
 
@@ -39,6 +41,31 @@ export const getGym = cache(async (memberId: string): Promise<Gym | null> => {
   const { data } = await supabase.from("gyms").select("*").eq("member_id", memberId).maybeSingle();
   return (data as Gym | null) ?? null;
 });
+
+/**
+ * The target the Today/Gym pages actually show for a date: engine targets +
+ * the member's adaptive offset + training-day carb cycling, floored at the
+ * safety limit. The assistant must use this, not the raw engine target.
+ */
+export async function getGymDayTargets(
+  profile: Profile,
+  date: string,
+): Promise<NutrientTargets | null> {
+  if (!profile.targets_cache) return null;
+  const floor = calorieFloorFor(profile.sex);
+  const base = applyCalorieAdjustment(
+    profile.targets_cache.targets,
+    profile.calorie_adjustment_kcal ?? 0,
+    floor,
+  );
+  const gym = await getGym(profile.id);
+  const scheduled = gym?.training_days ?? [];
+  return dayFuel(base, {
+    isTrainingDay: scheduled.includes(weekdayIndex(date)),
+    trainingDaysPerWeek: scheduled.length,
+    floorKcal: floor,
+  });
+}
 
 export const getActiveProgram = cache(async (memberId: string): Promise<ProgramWithDays | null> => {
   const supabase = await createClient();
@@ -74,6 +101,54 @@ export const getActiveProgram = cache(async (memberId: string): Promise<ProgramW
   };
 });
 
+/** Names of every program day the member owns — active or archived. */
+export const getProgramDayNames = cache(async (memberId: string): Promise<Map<string, string>> => {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("program_days")
+    .select("id, name, programs!inner(member_id)")
+    .eq("programs.member_id", memberId);
+  const rows = (data ?? []) as unknown as { id: string; name: string }[];
+  return new Map(rows.map((d) => [d.id, d.name]));
+});
+
+/**
+ * One program day with its exercises, regardless of whether the program is
+ * still active. Past sessions must keep their plan after a rebuild.
+ */
+export const getProgramDayDetail = cache(
+  async (
+    dayId: string,
+    memberId: string,
+  ): Promise<(ProgramDay & { exercises: ProgramExercise[] }) | null> => {
+    const supabase = await createClient();
+    const { data: day } = await supabase
+      .from("program_days")
+      .select("*")
+      .eq("id", dayId)
+      .maybeSingle();
+    if (!day) return null;
+
+    const { data: program } = await supabase
+      .from("programs")
+      .select("id")
+      .eq("id", day.program_id)
+      .eq("member_id", memberId)
+      .maybeSingle();
+    if (!program) return null;
+
+    const { data: exercises } = await supabase
+      .from("program_exercises")
+      .select("*")
+      .eq("program_day_id", dayId)
+      .order("position");
+    return {
+      ...(day as ProgramDay),
+      exercises: (exercises ?? []) as ProgramExercise[],
+    };
+  },
+);
+
 export const getCustomExercises = cache(async (memberId: string): Promise<CustomExercise[]> => {
   const supabase = await createClient();
   const { data } = await supabase
@@ -85,7 +160,10 @@ export const getCustomExercises = cache(async (memberId: string): Promise<Custom
 });
 
 /** Seed + custom, with custom exercises always considered available. */
-export async function getExerciseLibrary(memberId: string, equipmentIds: string[]): Promise<ExerciseView[]> {
+export async function getExerciseLibrary(
+  memberId: string,
+  equipmentIds: string[],
+): Promise<ExerciseView[]> {
   const custom = await getCustomExercises(memberId);
   const seed = availableExercises(equipmentIds);
   const customViews: ExerciseView[] = custom.map((e) => ({
@@ -147,6 +225,7 @@ export const getRecentSessions = cache(async (memberId: string, limit = 40): Pro
     .select("*")
     .eq("member_id", memberId)
     .order("session_date", { ascending: false })
+    .order("created_at", { ascending: false })
     .limit(limit);
   return (data ?? []) as WorkoutSession[];
 });
@@ -261,6 +340,32 @@ export async function getLastSets(
   return Object.fromEntries(byExercise);
 }
 
+/**
+ * All-time best e1RM per exercise. Used by the workout screen to mark a set
+ * as a PR and to keep the next-load suggestion honest.
+ */
+export async function getBestE1rms(
+  memberId: string,
+  exerciseKeys: string[],
+): Promise<Record<string, number>> {
+  if (exerciseKeys.length === 0) return {};
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("set_logs")
+    .select("exercise_key, weight_kg, reps, is_warmup")
+    .eq("member_id", memberId)
+    .in("exercise_key", exerciseKeys)
+    .is("deleted_at", null)
+    .limit(5000);
+  const best: Record<string, number> = {};
+  for (const row of data ?? []) {
+    if (row.is_warmup) continue;
+    const value = epley1rm(Number(row.weight_kg), row.reps);
+    if (value > (best[row.exercise_key] ?? 0)) best[row.exercise_key] = value;
+  }
+  return best;
+}
+
 export interface GymToday {
   gym: Gym | null;
   program: ProgramWithDays | null;
@@ -287,22 +392,28 @@ export async function getGymToday(profile: Profile, today = istDateISO()): Promi
   const weekday = weekdayIndex(today);
   const isTrainingDay = (gym?.training_days ?? []).includes(weekday);
   const programDay = program ? programDayForDate(program.days, gym?.training_days ?? [], weekday) : null;
-  const session = sessions.find((s) => s.session_date === today) ?? null;
+  const session = pickSessionForDate(sessions, today);
 
   const streak = computeStreak({
-    sessionDates: sessions.filter((s) => s.status !== "skipped").map((s) => s.session_date),
+    sessionDates: completedSessionDates(sessions),
     scheduledDays: gym?.training_days ?? [],
     today,
     freezes: freezes.map((f) => f.used_on),
   });
 
+  const floor = calorieFloorFor(profile.sex);
   const base: NutrientTargets | null = profile.targets_cache
-    ? applyCalorieAdjustment(profile.targets_cache.targets, profile.calorie_adjustment_kcal ?? 0)
+    ? applyCalorieAdjustment(
+        profile.targets_cache.targets,
+        profile.calorie_adjustment_kcal ?? 0,
+        floor,
+      )
     : null;
   const fuel = base
     ? dayFuel(base, {
         isTrainingDay,
         trainingDaysPerWeek: (gym?.training_days ?? []).length,
+        floorKcal: floor,
       })
     : null;
 

@@ -4,12 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PlatePicker, type PickedPlate } from "./plate-picker";
+import { epley1rm, isPr as isNewPr } from "@/lib/gym/e1rm";
+import { suggestNextLoad } from "@/lib/gym/progression";
+import { warmupRamp } from "@/lib/gym/plates";
 import {
   enqueue,
   flushQueue,
   installAutoFlush,
-  pendingCount,
+  queueSummary,
+  retryFailed,
   subscribeQueue,
+  type QueueSummary,
 } from "@/lib/gym/local-queue";
 import type { PlateDenom, WeightUnit } from "@/lib/gym/types";
 
@@ -31,6 +36,8 @@ export interface WorkoutSet {
   reps: number;
   plates: { label: string; qty: number }[] | null;
   isWarmup: boolean;
+  /** True when this set beat the previous best e1RM for the lift. */
+  isPr: boolean;
 }
 
 interface Draft {
@@ -74,6 +81,7 @@ export function WorkoutClient({
   exercises,
   existingSets,
   lastSets,
+  bestByExercise,
   library,
 }: {
   sessionId: string;
@@ -86,6 +94,8 @@ export function WorkoutClient({
   exercises: WorkoutExercise[];
   existingSets: WorkoutSet[];
   lastSets: Record<string, WorkoutSet[]>;
+  /** All-time best e1RM per exercise key (kg). */
+  bestByExercise: Record<string, number>;
   library: { key: string; name: string }[];
 }) {
   const router = useRouter();
@@ -99,6 +109,7 @@ export function WorkoutClient({
 
   const [order, setOrder] = useState<string[]>(initialOrder);
   const [logged, setLogged] = useState<WorkoutSet[]>(existingSets);
+  const [best, setBest] = useState<Record<string, number>>(bestByExercise);
   const [drafts, setDrafts] = useState<Record<string, Draft>>(() => {
     const next: Record<string, Draft> = {};
     for (const exercise of exercises) {
@@ -123,12 +134,16 @@ export function WorkoutClient({
   });
   const [picker, setPicker] = useState<{ key: string; index: number } | null>(null);
   const [chipsByRow, setChipsByRow] = useState<Record<string, PickedPlate[]>>({});
-  const [pending, setPending] = useState(0);
+  const [queueState, setQueueState] = useState<QueueSummary>({
+    pending: 0,
+    errors: 0,
+    firstError: null,
+  });
   const [banner, setBanner] = useState<string | null>(null);
   const [added, setAdded] = useState("");
 
   useEffect(() => {
-    const unsubscribe = subscribeQueue(setPending);
+    const unsubscribe = subscribeQueue(setQueueState);
     const stop = installAutoFlush();
     void flushQueue();
     return () => {
@@ -172,6 +187,10 @@ export function WorkoutClient({
       return;
     }
     const id = newId();
+    const kg = toKg(weight, unit);
+    const candidate = epley1rm(kg, reps);
+    const pr = isNewPr(best[key] ?? null, candidate);
+    if (pr) setBest((prev) => ({ ...prev, [key]: candidate }));
     const local: WorkoutSet = {
       id,
       exerciseKey: key,
@@ -180,6 +199,7 @@ export function WorkoutClient({
       reps,
       plates: chips,
       isWarmup: false,
+      isPr: pr,
     };
     setLogged((prev) => [...prev, local]);
     setChipsByRow((prev) => {
@@ -204,13 +224,13 @@ export function WorkoutClient({
         session_id: sessionId,
         exercise_key: key,
         set_index: index,
-        weight_kg: toKg(weight, unit),
+        weight_kg: kg,
         display_weight: weight,
         display_unit: unit,
         plates: chips,
         reps,
         is_warmup: false,
-        is_pr: false,
+        is_pr: pr,
         client_updated_at: new Date().toISOString(),
       },
     });
@@ -223,7 +243,11 @@ export function WorkoutClient({
 
   async function removeSet(set: WorkoutSet) {
     setLogged((prev) => prev.filter((s) => s.id !== set.id));
-    await enqueue({ id: set.id, kind: "set_delete" });
+    await enqueue({
+      id: set.id,
+      kind: "set_delete",
+      data: { client_updated_at: new Date().toISOString() },
+    });
     await flushQueue();
   }
 
@@ -234,12 +258,14 @@ export function WorkoutClient({
       data: { ended_at: new Date().toISOString() },
     });
     const result = await flushQueue();
-    const left = await pendingCount();
-    if (result.failed > 0 || left > 0) {
+    const summary = await queueSummary();
+    if (result.failed > 0 || summary.pending > 0 || summary.errors > 0) {
       setBanner(
-        left > 0
-          ? `Saved on this device — ${left} item${left === 1 ? "" : "s"} will sync when the connection is back.`
-          : "The server rejected the last change. Retry from the sync banner.",
+        summary.errors > 0
+          ? `${summary.errors} saved set${summary.errors === 1 ? "" : "s"} rejected by the server — retry from the sync banner.`
+          : summary.pending > 0
+            ? `Saved on this device — ${summary.pending} item${summary.pending === 1 ? "" : "s"} will sync when the connection is back.`
+            : "The server rejected the last change. Retry from the sync banner.",
       );
       return;
     }
@@ -285,10 +311,18 @@ export function WorkoutClient({
         <div className="text-right">
           <p
             className={`inline-block border-2 border-neutral-900 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide ${
-              pending === 0 ? "bg-emerald-300" : "bg-amber-200 nb-blink"
+              queueState.errors > 0
+                ? "bg-red-200"
+                : queueState.pending === 0
+                  ? "bg-emerald-300"
+                  : "bg-amber-200 nb-blink"
             }`}
           >
-            {pending === 0 ? "All sets synced" : `${pending} pending`}
+            {queueState.errors > 0
+              ? `${queueState.errors} sync error${queueState.errors === 1 ? "" : "s"}`
+              : queueState.pending === 0
+                ? "All sets synced"
+                : `${queueState.pending} pending`}
           </p>
           {readOnly ? (
             <p className="mt-1 text-[10px] font-bold uppercase text-neutral-400">Completed</p>
@@ -298,7 +332,7 @@ export function WorkoutClient({
               onClick={() => void finish()}
               className="mt-1 block w-full border-2 border-neutral-900 bg-emerald-400 px-4 py-2 text-xs font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] nb-press"
             >
-              Finish workout
+              {totalSets === 0 ? "Mark today done" : "Finish workout"}
             </button>
           )}
         </div>
@@ -308,6 +342,22 @@ export function WorkoutClient({
         <p className="border-2 border-neutral-900 bg-amber-200 px-3 py-2 text-xs font-bold shadow-[2px_2px_0_#111]">
           {banner}
         </p>
+      )}
+
+      {queueState.errors > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-2 border-neutral-900 bg-red-100 px-3 py-2 text-xs font-bold shadow-[2px_2px_0_#111]">
+          <span>
+            {queueState.errors} saved set{queueState.errors === 1 ? "" : "s"} rejected by the server
+            {queueState.firstError ? `: ${queueState.firstError}` : "."}
+          </span>
+          <button
+            type="button"
+            onClick={() => void retryFailed()}
+            className="border-2 border-neutral-900 bg-white px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111]"
+          >
+            Retry sync
+          </button>
+        </div>
       )}
 
       {!readOnly && (
@@ -351,6 +401,29 @@ export function WorkoutClient({
           ? maxIndex + 1
           : Math.max(rows[key] ?? exercise.targetSets, maxIndex + 2, 1);
         const last = lastSets[key];
+        const suggestion =
+          last && last.length > 0
+            ? suggestNextLoad({
+                lastSets: last.map((s) => ({
+                  weightKg: toKg(s.weight, unit),
+                  reps: s.reps,
+                  isWarmup: s.isWarmup,
+                })),
+                repMin: exercise.repMin,
+                repMax: exercise.repMax,
+                incrementKg: exercise.incrementKg,
+              })
+            : null;
+        const suggestionDisplay =
+          suggestion == null
+            ? null
+            : unit === "lb"
+              ? suggestion.weightKg / 0.45359237
+              : suggestion.weightKg;
+        const ramp =
+          last && last.length > 0 && exercise.incrementKg > 0
+            ? warmupRamp(suggestionDisplay ?? last[0].weight, barWeight)
+            : [];
 
         return (
           <section key={key} className="rounded-none border-2 border-neutral-900 bg-white p-4 shadow-[4px_4px_0_#111]">
@@ -360,6 +433,19 @@ export function WorkoutClient({
                 <p className="text-[11px] text-neutral-500">
                   Target {exercise.targetSets} × {exercise.repMin}–{exercise.repMax} · {summary(last)}
                 </p>
+                {suggestion && suggestionDisplay != null && suggestionDisplay > 0 && exercise.incrementKg > 0 && (
+                  <p
+                    className="mt-1 inline-block border-2 border-neutral-900 bg-sky-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide"
+                    title={suggestion.reason}
+                  >
+                    Next: {round(suggestionDisplay)} {unit} · {suggestion.action}
+                  </p>
+                )}
+                {ramp.length > 0 && (
+                  <p className="mt-1 text-[10px] text-neutral-400">
+                    Warm-up: {ramp.map((r) => `${r.label} ${round(r.weight)}`).join(" · ")} {unit}
+                  </p>
+                )}
                 {exercise.note && <p className="mt-1 text-[11px] italic text-neutral-400">{exercise.note}</p>}
               </div>
               {!readOnly && last && last.length > 0 && (
@@ -400,6 +486,11 @@ export function WorkoutClient({
                       <span className="text-sm font-extrabold">
                         {round(doneSet.weight)} {unit} × {doneSet.reps}
                       </span>
+                      {doneSet.isPr && (
+                        <span className="border-2 border-neutral-900 bg-yellow-300 px-1.5 py-0.5 text-[9px] font-extrabold uppercase">
+                          PR
+                        </span>
+                      )}
                       {doneSet.plates && doneSet.plates.length > 0 && (
                         <span className="text-[10px] font-bold text-neutral-500">
                           {doneSet.plates.map((p) => `${p.label}×${p.qty}`).join(" + ")} /side
