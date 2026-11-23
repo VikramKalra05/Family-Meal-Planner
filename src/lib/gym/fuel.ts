@@ -14,7 +14,16 @@
  */
 
 import type { NutrientTargets } from "@/lib/nutrition/types";
+import { CALORIE_FLOORS } from "@/lib/nutrition/types";
 import { addDays, clamp, weekdayIndex } from "./types";
+
+/**
+ * Hard daily calorie floor for a member. Unknown sex uses the female floor
+ * deliberately: an unsafe cut is worse than a conservative one.
+ */
+export function calorieFloorFor(sex: "male" | "female" | null | undefined): number {
+  return sex ? CALORIE_FLOORS[sex] : CALORIE_FLOORS.female;
+}
 
 export interface DayFuel extends NutrientTargets {
   trainingDay: boolean;
@@ -29,7 +38,7 @@ const round5 = (n: number) => Math.round(n / 5) * 5;
 
 export function dayFuel(
   base: NutrientTargets,
-  opts: { isTrainingDay: boolean; trainingDaysPerWeek: number },
+  opts: { isTrainingDay: boolean; trainingDaysPerWeek: number; floorKcal?: number },
 ): DayFuel {
   const trainingDays = clamp(Math.round(opts.trainingDaysPerWeek), 0, 7);
 
@@ -52,14 +61,17 @@ export function dayFuel(
   const deficitPct = (surplusPct * trainingDays) / restDays;
   const deltaPct = opts.isTrainingDay ? surplusPct : -deficitPct;
 
-  const deltaKcal = base.kcal * deltaPct;
+  // The safety floor wins over the carb-cycling maths: a rest-day deficit must
+  // never push the day below the engine's hard calorie floor.
+  const rawKcal = base.kcal + base.kcal * deltaPct;
+  const kcal = round5(Math.max(opts.floorKcal ?? 0, rawKcal));
+  const actualDelta = kcal - base.kcal;
   // Carbs carry the swing; a little fat moves with it so the macro maths
   // still adds up. Protein is held constant — it is a bodyweight target,
   // not an energy buffer.
-  const deltaCarbsG = (deltaKcal * 0.9) / 4;
-  const deltaFatG = (deltaKcal * 0.1) / 9;
+  const deltaCarbsG = (actualDelta * 0.9) / 4;
+  const deltaFatG = (actualDelta * 0.1) / 9;
 
-  const kcal = round5(Math.max(0, base.kcal + deltaKcal));
   const carbsG = Math.max(40, round1(base.carbsG + deltaCarbsG));
   const fatG = Math.max(0, round1(base.fatG + deltaFatG));
 
@@ -70,12 +82,12 @@ export function dayFuel(
     fatG,
     fiberG: base.fiberG,
     trainingDay: opts.isTrainingDay,
-    deltaKcal: Math.round(deltaKcal),
+    deltaKcal: Math.round(actualDelta),
     deltaCarbsG: round1(deltaCarbsG),
     deltaFatG: round1(deltaFatG),
     note: opts.isTrainingDay
-      ? `Training day · ${deltaKcal >= 0 ? "+" : ""}${Math.round(deltaKcal)} kcal, ${deltaCarbsG >= 0 ? "+" : ""}${Math.round(deltaCarbsG)} g carbs`
-      : `Rest day · ${Math.round(deltaKcal)} kcal, ${Math.round(deltaCarbsG)} g carbs`,
+      ? `Training day · ${actualDelta >= 0 ? "+" : ""}${Math.round(actualDelta)} kcal, ${deltaCarbsG >= 0 ? "+" : ""}${Math.round(deltaCarbsG)} g carbs`
+      : `Rest day · ${Math.round(actualDelta)} kcal, ${Math.round(deltaCarbsG)} g carbs`,
   };
 }
 
@@ -94,6 +106,7 @@ export function weekTargets(
   base: NutrientTargets,
   weekStart: string,
   scheduledDays: number[],
+  floorKcal = 0,
 ): Record<string, NutrientTargets> {
   const out: Record<string, NutrientTargets> = {};
   const perWeek = scheduledDays.filter((d) => d >= 0 && d <= 6).length;
@@ -102,6 +115,7 @@ export function weekTargets(
     const fuel = dayFuel(base, {
       isTrainingDay: scheduledDays.includes(weekdayIndex(date)),
       trainingDaysPerWeek: perWeek,
+      floorKcal,
     });
     out[date] = {
       kcal: fuel.kcal,
@@ -135,12 +149,15 @@ export function weeklyKcal(base: NutrientTargets, scheduledDays: number[]): numb
 export function applyCalorieAdjustment(
   base: NutrientTargets,
   deltaKcal: number,
+  floorKcal = 0,
 ): NutrientTargets {
   if (!deltaKcal) return base;
+  const kcal = Math.max(floorKcal, round5(base.kcal + deltaKcal));
+  const actualDelta = kcal - base.kcal;
   return {
-    kcal: Math.max(0, round5(base.kcal + deltaKcal)),
+    kcal,
     proteinG: base.proteinG,
-    carbsG: Math.max(40, round1(base.carbsG + deltaKcal / 4)),
+    carbsG: Math.max(40, round1(base.carbsG + actualDelta / 4)),
     fatG: base.fatG,
     fiberG: base.fiberG,
   };

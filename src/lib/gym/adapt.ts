@@ -25,6 +25,8 @@ export interface AdaptInput {
   weightLogs: number;
   sessions: number;
   currentAdjustmentKcal: number;
+  /** Lowest allowed offset after applying the calorie safety floor. */
+  minAdjustmentKcal?: number;
 }
 
 export interface AdaptSuggestion {
@@ -40,12 +42,15 @@ const MAX_ADJUSTMENT = 400;
 const STEP = 150;
 
 export function suggestAdaptation(input: AdaptInput): AdaptSuggestion {
-  const held = (reason: string): AdaptSuggestion => ({
+  const held = (
+    reason: string,
+    confidence: AdaptSuggestion["confidence"] = "low",
+  ): AdaptSuggestion => ({
     action: "hold",
     deltaKcal: 0,
     nextAdjustmentKcal: clamp(input.currentAdjustmentKcal, -MAX_ADJUSTMENT, MAX_ADJUSTMENT),
     reason,
-    confidence: "low",
+    confidence,
   });
 
   if (input.weightLogs < 10 || input.sessions < 6) {
@@ -66,11 +71,28 @@ export function suggestAdaptation(input: AdaptInput): AdaptSuggestion {
   const confidence: AdaptSuggestion["confidence"] =
     input.weightLogs >= 14 && input.sessions >= 8 ? "high" : "medium";
 
+  const minAdjustment = Math.max(
+    -MAX_ADJUSTMENT,
+    Math.min(0, input.minAdjustmentKcal ?? -MAX_ADJUSTMENT),
+  );
   const make = (delta: number, reason: string): AdaptSuggestion => {
-    const next = clamp(input.currentAdjustmentKcal + delta, -MAX_ADJUSTMENT, MAX_ADJUSTMENT);
+    const next = clamp(input.currentAdjustmentKcal + delta, minAdjustment, MAX_ADJUSTMENT);
+    const applied = next - input.currentAdjustmentKcal;
+    if (applied === 0) {
+      return {
+        action: "hold",
+        deltaKcal: 0,
+        nextAdjustmentKcal: next,
+        reason:
+          delta < 0
+            ? "At the safety floor — this plan cannot be tightened further."
+            : "Already at the maximum calorie offset.",
+        confidence,
+      };
+    }
     return {
-      action: delta > 0 ? "increase" : delta < 0 ? "decrease" : "hold",
-      deltaKcal: next - input.currentAdjustmentKcal,
+      action: applied > 0 ? "increase" : "decrease",
+      deltaKcal: applied,
       nextAdjustmentKcal: next,
       reason,
       confidence,
@@ -94,17 +116,31 @@ export function suggestAdaptation(input: AdaptInput): AdaptSuggestion {
       );
     }
     if (pct > 0.75) {
-      return held("Gaining a little fast, but no waist increase — hold and watch for two more weeks.");
+      return held(
+        waist == null
+          ? "Gaining fast, but there is no waist measurement yet — hold and measure before cutting."
+          : "Gaining fast without a waist increase — hold and watch for two more weeks.",
+        confidence,
+      );
     }
     if (pct < 0.25 && (strength ?? 0) > 0) {
-      return held("Strength is rising at a slow weight gain — this is a good recomp. Hold.");
+      return held("Strength is rising at a slow weight gain — this is a good recomp. Hold.", confidence);
     }
-    return held(`${pct.toFixed(2)}%/week is inside the muscle-gain band. Hold.`);
+    return held(`${pct.toFixed(2)}%/week is inside the muscle-gain band. Hold.`, confidence);
   }
 
   if (input.goal === "weight_loss") {
+    if (pct > 0) {
+      return make(
+        -STEP,
+        `Gaining ${pct.toFixed(2)}%/week while trying to lose — tighten by ${STEP} kcal.`,
+      );
+    }
     if (pct > -0.2) {
-      return make(-STEP, `Losing only ${Math.abs(pct).toFixed(2)}%/week — tighten by ${STEP} kcal.`);
+      return make(
+        -STEP,
+        `Losing only ${Math.abs(pct).toFixed(2)}%/week — tighten by ${STEP} kcal.`,
+      );
     }
     if (pct < -1 || (strength ?? 0) < -5) {
       return make(
@@ -112,11 +148,11 @@ export function suggestAdaptation(input: AdaptInput): AdaptSuggestion {
         `Losing ${Math.abs(pct).toFixed(2)}%/week${strength != null && strength < -5 ? ` and strength is down ${Math.abs(strength).toFixed(1)}%` : ""} — add ${STEP} kcal back.`,
       );
     }
-    return held(`${Math.abs(pct).toFixed(2)}%/week is inside the fat-loss band. Hold.`);
+    return held(`${Math.abs(pct).toFixed(2)}%/week is inside the fat-loss band. Hold.`, confidence);
   }
 
   // maintenance
   if (pct > 0.3) return make(-100, `Drifting up ${pct.toFixed(2)}%/week — trim 100 kcal.`);
   if (pct < -0.3) return make(100, `Drifting down ${Math.abs(pct).toFixed(2)}%/week — add 100 kcal.`);
-  return held("Weight is stable. Hold.");
+  return held("Weight is stable. Hold.", confidence);
 }

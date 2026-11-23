@@ -16,8 +16,16 @@ import {
 import { bestE1rm, epley1rm, isPr, pctChange, totalVolume } from "./e1rm";
 import { shouldDeload, suggestNextLoad, weeklySetsByMuscle } from "./progression";
 import { computeStreak, isTrainingDay } from "./streak";
-import { dayFuel, trainingDatesForWeek, weekTargets, weeklyKcal } from "./fuel";
+import {
+  applyCalorieAdjustment,
+  calorieFloorFor,
+  dayFuel,
+  trainingDatesForWeek,
+  weekTargets,
+  weeklyKcal,
+} from "./fuel";
 import { suggestAdaptation } from "./adapt";
+import { CALORIE_FLOORS } from "@/lib/nutrition/types";
 
 const baseTargets = { kcal: 2000, proteinG: 150, carbsG: 200, fatG: 60, fiberG: 30 };
 
@@ -254,6 +262,28 @@ describe("fuel cycling", () => {
     expect(addDays("2026-11-30", 1)).toBe("2026-12-01");
     expect(weekdayIndex("2026-11-16")).toBe(0);
   });
+
+  it("clamps the adaptive offset at the calorie safety floor", () => {
+    const cut = applyCalorieAdjustment(
+      { ...baseTargets, kcal: 1200, carbsG: 120 },
+      -400,
+      CALORIE_FLOORS.female,
+    );
+    expect(cut.kcal).toBe(1200);
+    expect(cut.carbsG).toBe(120);
+    expect(calorieFloorFor(null)).toBe(1200);
+    expect(calorieFloorFor("male")).toBe(1500);
+  });
+
+  it("clamps rest-day carb cycling at the same floor", () => {
+    const rest = dayFuel(
+      { ...baseTargets, kcal: 1200, carbsG: 120 },
+      { isTrainingDay: false, trainingDaysPerWeek: 6, floorKcal: 1200 },
+    );
+    expect(rest.kcal).toBe(1200);
+    expect(rest.deltaKcal).toBe(0);
+    expect(rest.deltaCarbsG).toBe(0);
+  });
 });
 
 describe("adaptive loop", () => {
@@ -292,6 +322,20 @@ describe("adaptive loop", () => {
       strengthTrendPct: 0,
     });
     expect(s.action).toBe("decrease");
+  });
+
+  it("holds instead of cutting below the safety floor", () => {
+    const s = suggestAdaptation({
+      ...base,
+      goal: "weight_loss",
+      weightTrendPerWeek: -0.05,
+      strengthTrendPct: 0,
+      currentAdjustmentKcal: -400,
+      minAdjustmentKcal: -400,
+    });
+    expect(s.action).toBe("hold");
+    expect(s.deltaKcal).toBe(0);
+    expect(s.reason).toContain("safety floor");
   });
 
   it("eases a cut that is too fast or costing strength", () => {

@@ -40,7 +40,7 @@ export async function generateWeekAction(formData: FormData): Promise<void> {
   const gymByMember = new Map((gymRows ?? []).map((g) => [g.member_id, (g.training_days ?? []) as number[]]));
   const membersWithDays: PlannerMember[] = members.map((m) => ({
     ...m,
-    targetsByDate: weekTargets(m.targets, weekStart, gymByMember.get(m.id) ?? []),
+    targetsByDate: weekTargets(m.targets, weekStart, gymByMember.get(m.id) ?? [], m.floorKcal ?? 0),
   }));
 
   const entries = generateWeek({ recipes: plannerRecipes, members: membersWithDays, weekStart });

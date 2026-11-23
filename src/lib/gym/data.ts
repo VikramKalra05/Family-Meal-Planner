@@ -24,7 +24,7 @@ import type {
 } from "@/lib/db-types";
 import type { NutrientTargets } from "@/lib/nutrition/types";
 import type { Profile } from "@/lib/db-types";
-import { applyCalorieAdjustment, dayFuel, type DayFuel } from "./fuel";
+import { applyCalorieAdjustment, calorieFloorFor, dayFuel, type DayFuel } from "./fuel";
 import { availableExercises, programDayForDate } from "./program";
 import { computeStreak, type StreakResult } from "./streak";
 import { weekdayIndex } from "./types";
@@ -296,13 +296,19 @@ export async function getGymToday(profile: Profile, today = istDateISO()): Promi
     freezes: freezes.map((f) => f.used_on),
   });
 
+  const floor = calorieFloorFor(profile.sex);
   const base: NutrientTargets | null = profile.targets_cache
-    ? applyCalorieAdjustment(profile.targets_cache.targets, profile.calorie_adjustment_kcal ?? 0)
+    ? applyCalorieAdjustment(
+        profile.targets_cache.targets,
+        profile.calorie_adjustment_kcal ?? 0,
+        floor,
+      )
     : null;
   const fuel = base
     ? dayFuel(base, {
         isTrainingDay,
         trainingDaysPerWeek: (gym?.training_days ?? []).length,
+        floorKcal: floor,
       })
     : null;
 

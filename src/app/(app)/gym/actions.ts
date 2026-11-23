@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { istDateISO } from "@/lib/date";
 import { GYM_EQUIPMENT } from "@/data/gym-equipment";
 import { buildProgram, templateById } from "@/lib/gym/program";
+import { calorieFloorFor } from "@/lib/gym/fuel";
 import { KG_BARS, LB_BARS, type PlateDenom, type WeightUnit, clamp } from "@/lib/gym/types";
 
 export type GymActionState = { error: string | null; ok: string | null };
@@ -347,7 +348,13 @@ export async function applyAdaptation(formData: FormData): Promise<void> {
   const reason = z.string().min(1).max(400).safeParse(formData.get("reason"));
   if (!delta.success || !reason.success) return;
 
-  const next = clamp((profile.calorie_adjustment_kcal ?? 0) + delta.data, -400, 400);
+  const base = profile.targets_cache?.targets;
+  const current = profile.calorie_adjustment_kcal ?? 0;
+  // Never let the adaptive offset push the day below the engine's safety floor.
+  const floor = calorieFloorFor(profile.sex);
+  const minAdjustment = base ? Math.min(400, Math.max(-400, floor - base.kcal)) : -400;
+  const next = clamp(current + delta.data, minAdjustment, 400);
+  if (next === current) return;
   const supabase = await createClient();
   await supabase
     .from("profiles")
@@ -356,7 +363,7 @@ export async function applyAdaptation(formData: FormData): Promise<void> {
   await supabase.from("adaptive_adjustments").insert({
     member_id: profile.id,
     effective_on: istDateISO(),
-    delta_kcal: next - (profile.calorie_adjustment_kcal ?? 0),
+    delta_kcal: next - current,
     total_kcal: next,
     reason: reason.data,
   });

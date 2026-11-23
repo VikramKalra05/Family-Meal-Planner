@@ -13,6 +13,7 @@ import { addDays, daysBetween, type Goal, type Muscle } from "@/lib/gym/types";
 import { epley1rm, strengthTrendPct } from "@/lib/gym/e1rm";
 import { volumeBand, weeklySetsByMuscle } from "@/lib/gym/progression";
 import { suggestAdaptation } from "@/lib/gym/adapt";
+import { calorieFloorFor } from "@/lib/gym/fuel";
 import { weightTrend, type WeightPoint } from "@/lib/weight";
 import type { AdaptiveAdjustment } from "@/lib/db-types";
 import { applyAdaptation, deleteMeasurement, deleteProgressPhoto, resetAdaptation } from "../actions";
@@ -153,6 +154,9 @@ export default async function GymProgressPage() {
   const completedLast21 = sessions.filter(
     (s) => s.status === "completed" && s.session_date >= addDays(today, -21),
   ).length;
+  const floorKcal = calorieFloorFor(profile.sex);
+  const baseKcal = profile.targets_cache?.targets.kcal ?? null;
+  const minAdjustmentKcal = baseKcal != null ? Math.max(-400, floorKcal - baseKcal) : -400;
   const suggestion = suggestAdaptation({
     goal: (profile.goal ?? "maintenance") as Goal,
     weightKg: latestWeight ?? 0,
@@ -162,6 +166,7 @@ export default async function GymProgressPage() {
     weightLogs: weightPoints.length,
     sessions: completedLast21,
     currentAdjustmentKcal: profile.calorie_adjustment_kcal ?? 0,
+    minAdjustmentKcal,
   });
   const adaptationHistory = (adaptationRes.data ?? []) as AdaptiveAdjustment[];
 
