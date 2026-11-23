@@ -10,6 +10,7 @@ import {
   type IntakeEditState,
 } from "./intake-actions";
 import { SubmitButton } from "@/components/submit-button";
+import { DatePicker } from "@/components/date-picker";
 import {
   SLOT_LABEL,
   SLOT_ORDER,
@@ -94,16 +95,16 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
           <button type="button" onClick={() => go(shiftISO(date, -1))} aria-label="Previous day" className={smallBtn}>
             ‹
           </button>
-          <input
-            type="date"
+          <DatePicker
             value={date}
-            max={today}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v && v <= today) go(v);
+            onChange={(next) => {
+              if (next && next <= today) go(next);
             }}
-            aria-label="Diary date"
-            className="rounded-none border-2 border-neutral-900 bg-white px-2 py-1 text-[11px] font-bold focus:shadow-[2px_2px_0_#111] focus:outline-none"
+            max={today}
+            today={today}
+            label="Diary date"
+            format="compact"
+            buttonClassName="border-2 border-neutral-900 bg-white px-2 py-1 text-[11px] font-extrabold shadow-[2px_2px_0_#111]"
           />
           <button
             type="button"
@@ -391,6 +392,7 @@ function ItemForm({
     mode === "add" ? addIntakeItem : updateIntakeItem,
     init,
   );
+  const [itemDate, setItemDate] = useState(item?.logged_on ?? date);
   const savedTs = useRef(0);
   useEffect(() => {
     if (state.ts && state.ts !== savedTs.current) {
@@ -449,8 +451,20 @@ function ItemForm({
           </select>
         </div>
         <div className="w-36">
-          <label className={microLabel} htmlFor={`date-${item?.id ?? `new-${slot}`}`}>Day</label>
-          <input id={`date-${item?.id ?? `new-${slot}`}`} name="date" type="date" required defaultValue={item?.logged_on ?? date} max={today} disabled={pending} className={field} />
+          <span className={microLabel}>Day</span>
+          <DatePicker
+            name="date"
+            required
+            value={itemDate}
+            onChange={setItemDate}
+            max={today}
+            today={today}
+            label="Day"
+            format="short"
+            className="block w-full"
+            buttonClassName={`${field} flex w-full items-center justify-between text-left`}
+            disabled={pending}
+          />
         </div>
         <button
           type="submit"

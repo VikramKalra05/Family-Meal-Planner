@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { DatePicker } from "@/components/date-picker";
 
 const input =
   "w-full rounded-none border-2 border-neutral-900 bg-white px-2 py-1.5 text-sm focus:shadow-[2px_2px_0_#111] focus:outline-none";
@@ -12,6 +13,7 @@ export function PhotoUpload({ memberId, today }: { memberId: string; today: stri
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [takenOn, setTakenOn] = useState(today);
 
   async function upload(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -74,10 +76,19 @@ export function PhotoUpload({ memberId, today }: { memberId: string; today: stri
         className="w-full text-xs file:mr-2 file:border-2 file:border-neutral-900 file:bg-yellow-300 file:px-3 file:py-1.5 file:text-[10px] file:font-extrabold file:uppercase"
       />
       <div className="grid grid-cols-2 gap-2">
-        <label className="block text-[10px] font-extrabold uppercase tracking-widest text-neutral-500">
+        <div className="block text-[10px] font-extrabold uppercase tracking-widest text-neutral-500">
           Date
-          <input type="date" name="takenOn" defaultValue={today} className={input} />
-        </label>
+          <DatePicker
+            name="takenOn"
+            value={takenOn}
+            onChange={setTakenOn}
+            max={today}
+            today={today}
+            label="Photo date"
+            className="mt-1 block w-full"
+            buttonClassName="flex w-full items-center justify-between border-2 border-neutral-900 bg-white px-2 py-1.5 text-sm focus:shadow-[2px_2px_0_#111] focus:outline-none"
+          />
+        </div>
         <label className="block text-[10px] font-extrabold uppercase tracking-widest text-neutral-500">
           Pose
           <select name="pose" className={input} defaultValue="front">
