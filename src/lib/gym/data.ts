@@ -27,6 +27,7 @@ import type { Profile } from "@/lib/db-types";
 import { applyCalorieAdjustment, calorieFloorFor, dayFuel, type DayFuel } from "./fuel";
 import { availableExercises, programDayForDate } from "./program";
 import { computeStreak, type StreakResult } from "./streak";
+import { completedSessionDates, pickSessionForDate } from "./sessions";
 import { weekdayIndex } from "./types";
 import { SEED_EXERCISES, type ExerciseView } from "@/data/seed-exercises";
 
@@ -198,6 +199,7 @@ export const getRecentSessions = cache(async (memberId: string, limit = 40): Pro
     .select("*")
     .eq("member_id", memberId)
     .order("session_date", { ascending: false })
+    .order("created_at", { ascending: false })
     .limit(limit);
   return (data ?? []) as WorkoutSession[];
 });
@@ -338,10 +340,10 @@ export async function getGymToday(profile: Profile, today = istDateISO()): Promi
   const weekday = weekdayIndex(today);
   const isTrainingDay = (gym?.training_days ?? []).includes(weekday);
   const programDay = program ? programDayForDate(program.days, gym?.training_days ?? [], weekday) : null;
-  const session = sessions.find((s) => s.session_date === today) ?? null;
+  const session = pickSessionForDate(sessions, today);
 
   const streak = computeStreak({
-    sessionDates: sessions.filter((s) => s.status !== "skipped").map((s) => s.session_date),
+    sessionDates: completedSessionDates(sessions),
     scheduledDays: gym?.training_days ?? [],
     today,
     freezes: freezes.map((f) => f.used_on),

@@ -16,6 +16,7 @@ import {
 import { bestE1rm, epley1rm, isPr, pctChange, totalVolume } from "./e1rm";
 import { shouldDeload, suggestNextLoad, weeklySetsByMuscle } from "./progression";
 import { computeStreak, isTrainingDay } from "./streak";
+import { completedSessionDates, pickSessionForDate } from "./sessions";
 import {
   applyCalorieAdjustment,
   calorieFloorFor,
@@ -226,6 +227,53 @@ describe("streak", () => {
   it("knows training days", () => {
     expect(isTrainingDay("2026-11-16", monWedFri)).toBe(true);
     expect(isTrainingDay("2026-11-17", monWedFri)).toBe(false);
+  });
+});
+
+describe("sessions", () => {
+  const session = (
+    id: string,
+    status: "in_progress" | "completed" | "skipped",
+    created: string,
+    date = "2026-11-19",
+  ) => ({ id, session_date: date, status, created_at: created });
+
+  it("prefers an open session over a skipped one on the same day", () => {
+    const picked = pickSessionForDate(
+      [
+        session("skip", "skipped", "2026-11-19T06:00:00Z"),
+        session("open", "in_progress", "2026-11-19T07:00:00Z"),
+        session("done", "completed", "2026-11-19T05:00:00Z"),
+      ],
+      "2026-11-19",
+    );
+    expect(picked?.id).toBe("open");
+  });
+
+  it("falls back to completed, then skipped", () => {
+    expect(
+      pickSessionForDate(
+        [
+          session("skip", "skipped", "2026-11-19T06:00:00Z"),
+          session("done", "completed", "2026-11-19T05:00:00Z"),
+        ],
+        "2026-11-19",
+      )?.id,
+    ).toBe("done");
+    expect(
+      pickSessionForDate([session("skip", "skipped", "2026-11-19T06:00:00Z")], "2026-11-19")?.id,
+    ).toBe("skip");
+    expect(pickSessionForDate([], "2026-11-19")).toBeNull();
+  });
+
+  it("counts only completed dates toward the streak", () => {
+    expect(
+      completedSessionDates([
+        session("a", "completed", "2026-11-17T06:00:00Z", "2026-11-17"),
+        session("b", "in_progress", "2026-11-18T06:00:00Z", "2026-11-18"),
+        session("c", "skipped", "2026-11-19T06:00:00Z", "2026-11-19"),
+      ]),
+    ).toEqual(["2026-11-17"]);
   });
 });
 

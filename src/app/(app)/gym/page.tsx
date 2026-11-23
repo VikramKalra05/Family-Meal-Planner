@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { istDateISO } from "@/lib/date";
 import { addDays, weekdayIndex, WEEKDAY_LABELS } from "@/lib/gym/types";
 import { getGymToday, getRecentSessions, getExerciseMap, getProgramDayNames } from "@/lib/gym/data";
-import { startSession, useStreakFreeze } from "./actions";
+import { markTodayDone, startSession, useStreakFreeze } from "./actions";
 import { SubmitButton } from "@/components/submit-button";
 
 export const instant = false;
@@ -171,6 +171,18 @@ export default async function GymPage() {
                           className="rounded-none border-2 border-neutral-900 bg-emerald-400 px-5 py-3 text-sm font-extrabold uppercase tracking-wide shadow-[3px_3px_0_#111] nb-press"
                         >
                           Start workout →
+                        </SubmitButton>
+                      </form>
+                    )}
+                    {session?.status !== "completed" && (
+                      <form action={markTodayDone}>
+                        <input type="hidden" name="date" value={today} />
+                        <input type="hidden" name="programDayId" value={programDay.id} />
+                        <SubmitButton
+                          pendingText="Marking…"
+                          className="rounded-none border-2 border-neutral-900 bg-white px-4 py-3 text-xs font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] nb-press"
+                        >
+                          ✓ Mark done
                         </SubmitButton>
                       </form>
                     )}
