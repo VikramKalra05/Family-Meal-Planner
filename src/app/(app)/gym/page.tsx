@@ -309,7 +309,7 @@ export default async function GymPage() {
                 </>
               ) : (
                 <p className="mt-2 text-sm text-neutral-500">
-                  No sessions yet. Your first one is the hardest — start it above.
+                  No completed sessions yet. Your first one is the hardest — start it above.
                 </p>
               )}
               <div className="mt-4 border-t-2 border-neutral-100 pt-3">

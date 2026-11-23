@@ -256,6 +256,7 @@ export async function startSession(formData: FormData): Promise<void> {
   const programDayId = z.string().uuid().safeParse(formData.get("programDayId"));
   const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).safeParse(formData.get("date"));
   const today = date.success ? date.data : istDateISO();
+  if (today > istDateISO()) return;
   const supabase = await createClient();
 
   // Only a day from the user's own active program may be attached.
@@ -479,6 +480,7 @@ export async function saveMeasurement(
   const parsed = measurementSchema.safeParse(cleaned);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid measurement", ok: null };
   const v = parsed.data;
+  if (v.measuredOn > istDateISO()) return { error: "That date is in the future", ok: null };
 
   const supabase = await createClient();
   const { data: existing } = await supabase
@@ -551,17 +553,25 @@ export async function applyAdaptation(formData: FormData): Promise<void> {
   const next = clamp(current + delta.data, minAdjustment, 400);
   if (next === current) return;
   const supabase = await createClient();
-  await supabase
+  const { error } = await supabase
     .from("profiles")
     .update({ calorie_adjustment_kcal: next, updated_at: new Date().toISOString() })
     .eq("id", profile.id);
-  await supabase.from("adaptive_adjustments").insert({
+  if (error) return;
+  const { error: ledgerError } = await supabase.from("adaptive_adjustments").insert({
     member_id: profile.id,
     effective_on: istDateISO(),
     delta_kcal: next - current,
     total_kcal: next,
     reason: reason.data,
   });
+  if (ledgerError) {
+    // Don't leave an adjustment with no audit row.
+    await supabase
+      .from("profiles")
+      .update({ calorie_adjustment_kcal: current, updated_at: new Date().toISOString() })
+      .eq("id", profile.id);
+  }
   revalidatePath("/gym");
   revalidatePath("/gym/progress");
   revalidatePath("/");
@@ -570,18 +580,26 @@ export async function applyAdaptation(formData: FormData): Promise<void> {
 
 export async function resetAdaptation(): Promise<void> {
   const profile = await requireFullProfile();
+  const current = profile.calorie_adjustment_kcal ?? 0;
   const supabase = await createClient();
-  await supabase
+  const { error } = await supabase
     .from("profiles")
     .update({ calorie_adjustment_kcal: 0, updated_at: new Date().toISOString() })
     .eq("id", profile.id);
-  await supabase.from("adaptive_adjustments").insert({
+  if (error) return;
+  const { error: ledgerError } = await supabase.from("adaptive_adjustments").insert({
     member_id: profile.id,
     effective_on: istDateISO(),
-    delta_kcal: -(profile.calorie_adjustment_kcal ?? 0),
+    delta_kcal: -current,
     total_kcal: 0,
     reason: "Reset to the engine baseline.",
   });
+  if (ledgerError) {
+    await supabase
+      .from("profiles")
+      .update({ calorie_adjustment_kcal: current, updated_at: new Date().toISOString() })
+      .eq("id", profile.id);
+  }
   revalidatePath("/gym/progress");
   revalidatePath("/");
 }

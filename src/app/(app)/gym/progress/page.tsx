@@ -258,7 +258,7 @@ export default async function GymProgressPage() {
                 <span className="truncate">{a.reason}</span>
                 <span className="shrink-0 font-extrabold">
                   {a.delta_kcal > 0 ? "+" : ""}
-                  {a.delta_kcal} → {a.total_kcal}
+                  {a.delta_kcal} → {a.total_kcal} kcal offset
                 </span>
               </li>
             ))}
@@ -402,7 +402,7 @@ export default async function GymProgressPage() {
                     <img src={p.url} alt={`${p.pose} progress ${p.taken_on}`} className="aspect-[3/4] w-full object-cover" />
                   ) : (
                     <div className="flex aspect-[3/4] items-center justify-center text-[10px] text-neutral-400">
-                      link expired
+                      unavailable
                     </div>
                   )}
                   <div className="flex items-center justify-between border-t-2 border-neutral-900 px-1 py-0.5">

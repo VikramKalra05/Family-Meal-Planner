@@ -332,7 +332,7 @@ export function WorkoutClient({
               onClick={() => void finish()}
               className="mt-1 block w-full border-2 border-neutral-900 bg-emerald-400 px-4 py-2 text-xs font-extrabold uppercase tracking-wide shadow-[2px_2px_0_#111] nb-press"
             >
-              Finish workout
+              {totalSets === 0 ? "Mark today done" : "Finish workout"}
             </button>
           )}
         </div>
