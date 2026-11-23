@@ -10,6 +10,7 @@ import { istDateISO } from "@/lib/date";
 import { GYM_EQUIPMENT } from "@/data/gym-equipment";
 import { buildProgram, templateById, type ProgramTemplate } from "@/lib/gym/program";
 import { calorieFloorFor } from "@/lib/gym/fuel";
+import { mergeMeasurement, type MeasurementFields } from "@/lib/gym/measurements";
 import { pickSessionForDate } from "@/lib/gym/sessions";
 import { KG_BARS, LB_BARS, type PlateDenom, type WeightUnit, clamp } from "@/lib/gym/types";
 
@@ -480,17 +481,26 @@ export async function saveMeasurement(
   const v = parsed.data;
 
   const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("body_measurements")
+    .select("waist_cm, chest_cm, arm_cm, thigh_cm, hip_cm, neck_cm, notes")
+    .eq("member_id", profile.id)
+    .eq("measured_on", v.measuredOn)
+    .maybeSingle();
+  const merged = mergeMeasurement((existing as MeasurementFields | null) ?? null, {
+    waist: v.waist,
+    chest: v.chest,
+    arm: v.arm,
+    thigh: v.thigh,
+    hip: v.hip,
+    neck: v.neck,
+    notes: v.notes,
+  });
   const { error } = await supabase.from("body_measurements").upsert(
     {
       member_id: profile.id,
       measured_on: v.measuredOn,
-      waist_cm: v.waist ?? null,
-      chest_cm: v.chest ?? null,
-      arm_cm: v.arm ?? null,
-      thigh_cm: v.thigh ?? null,
-      hip_cm: v.hip ?? null,
-      neck_cm: v.neck ?? null,
-      notes: v.notes ?? null,
+      ...merged,
     },
     { onConflict: "member_id,measured_on" },
   );

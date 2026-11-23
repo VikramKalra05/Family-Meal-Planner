@@ -139,6 +139,7 @@ export default async function GymProgressPage() {
     .filter((m) => m.waist_cm != null)
     .map((m) => ({ date: m.measured_on, value: Number(m.waist_cm) }));
   const latest = measurements[0];
+  const measurementSeed = measurements.find((m) => m.measured_on === today) ?? latest ?? null;
   const oldestWaist = waistPoints.find((p) => daysBetween(p.date, today) >= 14);
   const latestWaist = waistPoints.at(-1);
   const waistDelta =
@@ -371,7 +372,22 @@ export default async function GymProgressPage() {
               <Sparkline points={waistPoints.slice(-12)} unit="cm" />
             </div>
           )}
-          <MeasurementForm today={today} />
+          <MeasurementForm
+            today={today}
+            initial={
+              measurementSeed
+                ? {
+                    waist: measurementSeed.waist_cm,
+                    chest: measurementSeed.chest_cm,
+                    arm: measurementSeed.arm_cm,
+                    thigh: measurementSeed.thigh_cm,
+                    hip: measurementSeed.hip_cm,
+                    neck: measurementSeed.neck_cm,
+                    notes: measurementSeed.notes,
+                  }
+                : null
+            }
+          />
         </div>
 
         <div className="rounded-none border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0_#111]">

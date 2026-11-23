@@ -17,6 +17,7 @@ import { bestE1rm, epley1rm, isPr, pctChange, totalVolume } from "./e1rm";
 import { shouldDeload, suggestNextLoad, weeklySetsByMuscle } from "./progression";
 import { computeStreak, isTrainingDay } from "./streak";
 import { completedSessionDates, pickSessionForDate } from "./sessions";
+import { mergeMeasurement } from "./measurements";
 import {
   applyCalorieAdjustment,
   calorieFloorFor,
@@ -227,6 +228,30 @@ describe("streak", () => {
   it("knows training days", () => {
     expect(isTrainingDay("2026-11-16", monWedFri)).toBe(true);
     expect(isTrainingDay("2026-11-17", monWedFri)).toBe(false);
+  });
+});
+
+describe("measurements", () => {
+  const existing = {
+    waist_cm: 80,
+    chest_cm: 100,
+    arm_cm: 35,
+    thigh_cm: 55,
+    hip_cm: 95,
+    neck_cm: 38,
+    notes: "morning, empty stomach",
+  };
+
+  it("keeps previous fields when a later save leaves them blank", () => {
+    const merged = mergeMeasurement(existing, { waist: 79 });
+    expect(merged.waist_cm).toBe(79);
+    expect(merged.chest_cm).toBe(100);
+    expect(merged.arm_cm).toBe(35);
+    expect(merged.notes).toBe("morning, empty stomach");
+  });
+
+  it("fills blanks with null when there is no existing row", () => {
+    expect(mergeMeasurement(null, { waist: 80 }).chest_cm).toBeNull();
   });
 });
 
