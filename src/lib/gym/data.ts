@@ -41,6 +41,31 @@ export const getGym = cache(async (memberId: string): Promise<Gym | null> => {
   return (data as Gym | null) ?? null;
 });
 
+/**
+ * The target the Today/Gym pages actually show for a date: engine targets +
+ * the member's adaptive offset + training-day carb cycling, floored at the
+ * safety limit. The assistant must use this, not the raw engine target.
+ */
+export async function getGymDayTargets(
+  profile: Profile,
+  date: string,
+): Promise<NutrientTargets | null> {
+  if (!profile.targets_cache) return null;
+  const floor = calorieFloorFor(profile.sex);
+  const base = applyCalorieAdjustment(
+    profile.targets_cache.targets,
+    profile.calorie_adjustment_kcal ?? 0,
+    floor,
+  );
+  const gym = await getGym(profile.id);
+  const scheduled = gym?.training_days ?? [];
+  return dayFuel(base, {
+    isTrainingDay: scheduled.includes(weekdayIndex(date)),
+    trainingDaysPerWeek: scheduled.length,
+    floorKcal: floor,
+  });
+}
+
 export const getActiveProgram = cache(async (memberId: string): Promise<ProgramWithDays | null> => {
   const supabase = await createClient();
   const { data: program } = await supabase
