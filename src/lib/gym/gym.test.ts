@@ -13,7 +13,7 @@ import {
   totalFromPlates,
   warmupRamp,
 } from "./plates";
-import { bestE1rm, epley1rm, isPr, pctChange, totalVolume } from "./e1rm";
+import { bestE1rm, epley1rm, isPr, pctChange, strengthTrendPct, totalVolume } from "./e1rm";
 import { shouldDeload, suggestNextLoad, weeklySetsByMuscle } from "./progression";
 import { computeStreak, isTrainingDay } from "./streak";
 import { completedSessionDates, pickSessionForDate } from "./sessions";
@@ -122,6 +122,13 @@ describe("e1RM + volume", () => {
     expect(isPr(80, 82.5)).toBe(true);
     expect(pctChange(100, 105)).toBe(5);
     expect(pctChange(null, 105)).toBeNull();
+  });
+
+  it("smooths the strength trend against one noisy session", () => {
+    expect(strengthTrendPct([100, 100, 100, 100, 80])).toBe(0);
+    expect(strengthTrendPct([100, 105, 110])).toBe(7.5);
+    expect(strengthTrendPct([100, 100, 100, 110, 110])).toBe(10);
+    expect(strengthTrendPct([100, 100])).toBeNull();
   });
 });
 

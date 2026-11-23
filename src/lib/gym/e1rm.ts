@@ -54,15 +54,25 @@ export function pctChange(from: number | null, to: number | null): number | null
 }
 
 /**
- * Median e1RM change across a lift's recent sessions, as a percentage.
- * Robust to one noisy session. Requires at least three points.
+ * Smoothed percentage change between the medians of the first and second
+ * halves of the e1RM series. A single noisy session (or a deload) can move one
+ * endpoint, but not the median of a half. Requires at least three points.
  */
 export function strengthTrendPct(e1rms: number[]): number | null {
   if (e1rms.length < 3) return null;
-  const first = e1rms[0];
-  const last = e1rms[e1rms.length - 1];
+  const mid = Math.floor(e1rms.length / 2);
+  const first = median(e1rms.slice(0, mid));
+  const second = median(e1rms.slice(mid));
   if (first <= 0) return null;
-  return Math.round(((last - first) / first) * 1000) / 10;
+  return Math.round(((second - first) / first) * 1000) / 10;
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[mid]
+    : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 /** A lift is "stalled" when its best of the last two sessions is below 98%
