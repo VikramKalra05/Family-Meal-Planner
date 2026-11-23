@@ -123,7 +123,10 @@ async function activateProgram(
     .eq("member_id", profileId)
     .eq("is_active", true)
     .maybeSingle();
-  if (readError) return readError.message;
+  if (readError) {
+    await supabase.from("programs").delete().eq("id", newProgramId).eq("member_id", profileId);
+    return readError.message;
+  }
   if (current?.id === newProgramId) return null;
 
   if (current) {
@@ -131,7 +134,10 @@ async function activateProgram(
       .from("programs")
       .update({ is_active: false })
       .eq("id", current.id);
-    if (deactivateError) return deactivateError.message;
+    if (deactivateError) {
+      await supabase.from("programs").delete().eq("id", newProgramId).eq("member_id", profileId);
+      return deactivateError.message;
+    }
   }
 
   const { error: activateError } = await supabase
