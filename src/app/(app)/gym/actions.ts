@@ -12,7 +12,7 @@ import { buildProgram, templateById, type ProgramTemplate } from "@/lib/gym/prog
 import { calorieFloorFor } from "@/lib/gym/fuel";
 import { mergeMeasurement, type MeasurementFields } from "@/lib/gym/measurements";
 import { pickSessionForDate } from "@/lib/gym/sessions";
-import { KG_BARS, LB_BARS, weekdayIndex, type PlateDenom, type WeightUnit, clamp } from "@/lib/gym/types";
+import { KG_BARS, LB_BARS, weekdayIndex, EQUIPMENT, MUSCLES, PATTERNS, type PlateDenom, type WeightUnit, clamp } from "@/lib/gym/types";
 
 export type GymActionState = { error: string | null; ok: string | null };
 
@@ -636,9 +636,9 @@ export async function useStreakFreeze(formData: FormData): Promise<void> {
 // ── Custom exercises ────────────────────────────────────────────────────────
 const customExerciseSchema = z.object({
   name: z.string().min(2).max(80),
-  primary: z.string().min(2).max(30),
-  equipment: z.string().min(2).max(30),
-  pattern: z.string().min(2).max(30),
+  primary: z.enum(MUSCLES),
+  equipment: z.enum(EQUIPMENT),
+  pattern: z.enum(PATTERNS),
   instructions: z.string().max(600).optional(),
 });
 
