@@ -305,7 +305,8 @@ export function hasEquipment(available: Set<string>, required: string): boolean 
 }
 
 export function exerciseAvailable(exercise: SeedExercise, available: string[]): boolean {
-  if (available.length === 0) return true;
+  // No equipment selected means bodyweight-only, not "anything goes".
+  if (available.length === 0) return exercise.equipmentIds.length === 0;
   const set = new Set(available);
   return exercise.equipmentIds.every((id) => hasEquipment(set, id));
 }
@@ -344,7 +345,6 @@ export interface BuiltProgram {
  * keep the day with bodyweight movements so the plan still has a shape.
  */
 export function buildProgram(template: ProgramTemplate, equipmentIds: string[]): BuiltProgram {
-  const available = new Set(equipmentIds);
   const byKey = new Map(SEED_EXERCISES.map((e) => [e.key, e]));
   const bodyweightFallback = SEED_EXERCISES.filter((e) => e.equipmentIds.length === 0).map((e) => e.key);
 
@@ -352,8 +352,7 @@ export function buildProgram(template: ProgramTemplate, equipmentIds: string[]):
     const kept = day.exercises.filter((t) => {
       const seed = byKey.get(t.exerciseKey);
       if (!seed) return false;
-      if (equipmentIds.length === 0) return true;
-      return seed.equipmentIds.every((id) => hasEquipment(available, id));
+      return exerciseAvailable(seed, equipmentIds);
     });
     if (kept.length >= 3) {
       return { name: day.name, focus: day.focus, exercises: kept };

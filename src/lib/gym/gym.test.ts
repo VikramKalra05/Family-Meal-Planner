@@ -15,6 +15,8 @@ import {
 } from "./plates";
 import { bestE1rm, epley1rm, isPr, pctChange, strengthTrendPct, totalVolume } from "./e1rm";
 import { shouldDeload, suggestNextLoad, weeklySetsByMuscle } from "./progression";
+import { PROGRAM_TEMPLATES, availableExercises, buildProgram } from "./program";
+import { SEED_EXERCISES } from "@/data/seed-exercises";
 import { computeStreak, isTrainingDay } from "./streak";
 import { completedSessionDates, pickSessionForDate } from "./sessions";
 import { mergeMeasurement } from "./measurements";
@@ -31,6 +33,23 @@ import { suggestAdaptation } from "./adapt";
 import { CALORIE_FLOORS } from "@/lib/nutrition/types";
 
 const baseTargets = { kcal: 2000, proteinG: 150, carbsG: 200, fatG: 60, fiberG: 30 };
+
+describe("program builder", () => {
+  it("treats zero equipment as bodyweight-only", () => {
+    const template = PROGRAM_TEMPLATES.find((t) => t.id === "full_body_3")!;
+    const built = buildProgram(template, []);
+    expect(built.days).toHaveLength(3);
+    for (const day of built.days) {
+      expect(day.exercises.length).toBeGreaterThan(0);
+      for (const exercise of day.exercises) {
+        const seed = SEED_EXERCISES.find((s) => s.key === exercise.exerciseKey);
+        expect(seed).toBeTruthy();
+        expect(seed!.equipmentIds).toHaveLength(0);
+      }
+    }
+    expect(availableExercises([]).every((e) => e.equipmentIds.length === 0)).toBe(true);
+  });
+});
 
 describe("plate solver", () => {
   it("builds an exact 82.5 kg bar", () => {

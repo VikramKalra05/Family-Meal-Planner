@@ -159,6 +159,13 @@ export function SetupForm({ initial }: { initial: SetupInitial }) {
           </select>
         </div>
 
+        {equipmentIds.length === 0 && (
+          <p className="mt-3 border-2 border-neutral-900 bg-amber-100 px-3 py-2 text-[11px] font-bold text-amber-900">
+            No equipment selected — your program will use bodyweight movements only. Pick Home or tick
+            what your gym has.
+          </p>
+        )}
+
         <div className="mt-4 space-y-5">
           {groups.map(([cat, list]) => (
             <div key={cat}>
