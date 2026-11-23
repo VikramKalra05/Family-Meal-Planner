@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireFullProfile } from "@/lib/profile";
 import {
   getActiveProgram,
+  getBestE1rms,
   getExerciseMap,
   getGym,
   getLastSets,
@@ -34,6 +35,7 @@ function toView(set: SetLog, unit: WeightUnit): WorkoutSet {
     reps: set.reps,
     plates: (set.plates as { label: string; qty: number }[] | null) ?? null,
     isWarmup: set.is_warmup,
+    isPr: set.is_pr,
   };
 }
 
@@ -83,7 +85,10 @@ export default async function WorkoutPage({ params }: { params: Promise<{ id: st
   }));
 
   const keys = exercises.map((e) => e.key);
-  const lastRaw = await getLastSets(profile.id, keys, id);
+  const [lastRaw, bestByExercise] = await Promise.all([
+    getLastSets(profile.id, keys, id),
+    getBestE1rms(profile.id, keys),
+  ]);
   const lastSets: Record<string, WorkoutSet[]> = Object.fromEntries(
     Object.entries(lastRaw).map(([key, rows]) => [key, rows.map((r) => toView(r, unit))]),
   );
@@ -100,6 +105,7 @@ export default async function WorkoutPage({ params }: { params: Promise<{ id: st
       exercises={exercises}
       existingSets={sets.map((s) => toView(s, unit))}
       lastSets={lastSets}
+      bestByExercise={bestByExercise}
       library={[...exerciseMap.values()].map((e) => ({ key: e.key, name: e.name }))}
     />
   );

@@ -28,6 +28,7 @@ import { applyCalorieAdjustment, calorieFloorFor, dayFuel, type DayFuel } from "
 import { availableExercises, programDayForDate } from "./program";
 import { computeStreak, type StreakResult } from "./streak";
 import { completedSessionDates, pickSessionForDate } from "./sessions";
+import { epley1rm } from "./e1rm";
 import { weekdayIndex } from "./types";
 import { SEED_EXERCISES, type ExerciseView } from "@/data/seed-exercises";
 
@@ -337,6 +338,32 @@ export async function getLastSets(
   // Rows arrived newest-first; present them oldest-first inside the session.
   for (const [key, sets] of byExercise) byExercise.set(key, sets.reverse());
   return Object.fromEntries(byExercise);
+}
+
+/**
+ * All-time best e1RM per exercise. Used by the workout screen to mark a set
+ * as a PR and to keep the next-load suggestion honest.
+ */
+export async function getBestE1rms(
+  memberId: string,
+  exerciseKeys: string[],
+): Promise<Record<string, number>> {
+  if (exerciseKeys.length === 0) return {};
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("set_logs")
+    .select("exercise_key, weight_kg, reps, is_warmup")
+    .eq("member_id", memberId)
+    .in("exercise_key", exerciseKeys)
+    .is("deleted_at", null)
+    .limit(5000);
+  const best: Record<string, number> = {};
+  for (const row of data ?? []) {
+    if (row.is_warmup) continue;
+    const value = epley1rm(Number(row.weight_kg), row.reps);
+    if (value > (best[row.exercise_key] ?? 0)) best[row.exercise_key] = value;
+  }
+  return best;
 }
 
 export interface GymToday {

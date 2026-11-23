@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PlatePicker, type PickedPlate } from "./plate-picker";
+import { epley1rm, isPr as isNewPr } from "@/lib/gym/e1rm";
+import { suggestNextLoad } from "@/lib/gym/progression";
+import { warmupRamp } from "@/lib/gym/plates";
 import {
   enqueue,
   flushQueue,
@@ -33,6 +36,8 @@ export interface WorkoutSet {
   reps: number;
   plates: { label: string; qty: number }[] | null;
   isWarmup: boolean;
+  /** True when this set beat the previous best e1RM for the lift. */
+  isPr: boolean;
 }
 
 interface Draft {
@@ -76,6 +81,7 @@ export function WorkoutClient({
   exercises,
   existingSets,
   lastSets,
+  bestByExercise,
   library,
 }: {
   sessionId: string;
@@ -88,6 +94,8 @@ export function WorkoutClient({
   exercises: WorkoutExercise[];
   existingSets: WorkoutSet[];
   lastSets: Record<string, WorkoutSet[]>;
+  /** All-time best e1RM per exercise key (kg). */
+  bestByExercise: Record<string, number>;
   library: { key: string; name: string }[];
 }) {
   const router = useRouter();
@@ -101,6 +109,7 @@ export function WorkoutClient({
 
   const [order, setOrder] = useState<string[]>(initialOrder);
   const [logged, setLogged] = useState<WorkoutSet[]>(existingSets);
+  const [best, setBest] = useState<Record<string, number>>(bestByExercise);
   const [drafts, setDrafts] = useState<Record<string, Draft>>(() => {
     const next: Record<string, Draft> = {};
     for (const exercise of exercises) {
@@ -178,6 +187,10 @@ export function WorkoutClient({
       return;
     }
     const id = newId();
+    const kg = toKg(weight, unit);
+    const candidate = epley1rm(kg, reps);
+    const pr = isNewPr(best[key] ?? null, candidate);
+    if (pr) setBest((prev) => ({ ...prev, [key]: candidate }));
     const local: WorkoutSet = {
       id,
       exerciseKey: key,
@@ -186,6 +199,7 @@ export function WorkoutClient({
       reps,
       plates: chips,
       isWarmup: false,
+      isPr: pr,
     };
     setLogged((prev) => [...prev, local]);
     setChipsByRow((prev) => {
@@ -210,13 +224,13 @@ export function WorkoutClient({
         session_id: sessionId,
         exercise_key: key,
         set_index: index,
-        weight_kg: toKg(weight, unit),
+        weight_kg: kg,
         display_weight: weight,
         display_unit: unit,
         plates: chips,
         reps,
         is_warmup: false,
-        is_pr: false,
+        is_pr: pr,
         client_updated_at: new Date().toISOString(),
       },
     });
@@ -383,6 +397,29 @@ export function WorkoutClient({
           ? maxIndex + 1
           : Math.max(rows[key] ?? exercise.targetSets, maxIndex + 2, 1);
         const last = lastSets[key];
+        const suggestion =
+          last && last.length > 0
+            ? suggestNextLoad({
+                lastSets: last.map((s) => ({
+                  weightKg: toKg(s.weight, unit),
+                  reps: s.reps,
+                  isWarmup: s.isWarmup,
+                })),
+                repMin: exercise.repMin,
+                repMax: exercise.repMax,
+                incrementKg: exercise.incrementKg,
+              })
+            : null;
+        const suggestionDisplay =
+          suggestion == null
+            ? null
+            : unit === "lb"
+              ? suggestion.weightKg / 0.45359237
+              : suggestion.weightKg;
+        const ramp =
+          last && last.length > 0 && exercise.incrementKg > 0
+            ? warmupRamp(suggestionDisplay ?? last[0].weight, barWeight)
+            : [];
 
         return (
           <section key={key} className="rounded-none border-2 border-neutral-900 bg-white p-4 shadow-[4px_4px_0_#111]">
@@ -392,6 +429,19 @@ export function WorkoutClient({
                 <p className="text-[11px] text-neutral-500">
                   Target {exercise.targetSets} × {exercise.repMin}–{exercise.repMax} · {summary(last)}
                 </p>
+                {suggestion && suggestionDisplay != null && suggestionDisplay > 0 && exercise.incrementKg > 0 && (
+                  <p
+                    className="mt-1 inline-block border-2 border-neutral-900 bg-sky-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide"
+                    title={suggestion.reason}
+                  >
+                    Next: {round(suggestionDisplay)} {unit} · {suggestion.action}
+                  </p>
+                )}
+                {ramp.length > 0 && (
+                  <p className="mt-1 text-[10px] text-neutral-400">
+                    Warm-up: {ramp.map((r) => `${r.label} ${round(r.weight)}`).join(" · ")} {unit}
+                  </p>
+                )}
                 {exercise.note && <p className="mt-1 text-[11px] italic text-neutral-400">{exercise.note}</p>}
               </div>
               {!readOnly && last && last.length > 0 && (
@@ -432,6 +482,11 @@ export function WorkoutClient({
                       <span className="text-sm font-extrabold">
                         {round(doneSet.weight)} {unit} × {doneSet.reps}
                       </span>
+                      {doneSet.isPr && (
+                        <span className="border-2 border-neutral-900 bg-yellow-300 px-1.5 py-0.5 text-[9px] font-extrabold uppercase">
+                          PR
+                        </span>
+                      )}
                       {doneSet.plates && doneSet.plates.length > 0 && (
                         <span className="text-[10px] font-bold text-neutral-500">
                           {doneSet.plates.map((p) => `${p.label}×${p.qty}`).join(" + ")} /side
