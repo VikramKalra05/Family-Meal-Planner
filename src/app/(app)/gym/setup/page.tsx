@@ -35,6 +35,7 @@ export default async function GymSetupPage() {
           equipmentIds: gym?.equipment_ids ?? [],
           trainingDays: gym?.training_days ?? [0, 2, 4],
           plates: gym?.plate_inventory ?? [],
+          machineStacks: gym?.machine_stacks ?? [],
           templateId: program?.template ?? "full_body_3",
         }}
       />

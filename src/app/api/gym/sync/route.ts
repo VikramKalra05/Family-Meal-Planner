@@ -22,7 +22,7 @@ const plateSchema = z.object({
 const setPayload = z.object({
   session_id: z.string().uuid(),
   exercise_key: z.string().min(1).max(120),
-  set_index: z.number().int().min(0).max(50),
+  set_index: z.number().int().min(-50).max(50),
   weight_kg: z.number().min(0).max(1000),
   display_weight: z.number().min(0).max(2200).nullable().optional(),
   display_unit: z.enum(["kg", "lb"]).default("kg"),

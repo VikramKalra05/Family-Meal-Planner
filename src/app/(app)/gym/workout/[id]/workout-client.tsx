@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { PlatePicker, type PickedPlate } from "./plate-picker";
 import { epley1rm, isPr as isNewPr } from "@/lib/gym/e1rm";
 import { suggestNextLoad } from "@/lib/gym/progression";
-import { warmupRamp } from "@/lib/gym/plates";
+import { stackKg, warmupRamp } from "@/lib/gym/plates";
 import {
   discardFailed,
   enqueue,
@@ -17,7 +17,7 @@ import {
   subscribeQueue,
   type QueueSummary,
 } from "@/lib/gym/local-queue";
-import type { PlateDenom, WeightUnit } from "@/lib/gym/types";
+import type { MachineStack, PlateDenom, WeightUnit } from "@/lib/gym/types";
 
 export interface WorkoutExercise {
   key: string;
@@ -27,6 +27,7 @@ export interface WorkoutExercise {
   repMax: number;
   incrementKg: number;
   note: string | null;
+  equipmentIds: string[];
 }
 
 export interface WorkoutSet {
@@ -39,6 +40,7 @@ export interface WorkoutSet {
   isWarmup: boolean;
   /** True when this set beat the previous best e1RM for the lift. */
   isPr: boolean;
+  stackPosition: number | null;
 }
 
 interface Draft {
@@ -79,6 +81,7 @@ export function WorkoutClient({
   unit,
   barWeight,
   plates,
+  machineStacks,
   exercises,
   existingSets,
   lastSets,
@@ -92,6 +95,7 @@ export function WorkoutClient({
   unit: WeightUnit;
   barWeight: number;
   plates: PlateDenom[];
+  machineStacks: MachineStack[];
   exercises: WorkoutExercise[];
   existingSets: WorkoutSet[];
   lastSets: Record<string, WorkoutSet[]>;
@@ -101,6 +105,7 @@ export function WorkoutClient({
 }) {
   const router = useRouter();
   const loggingRef = useRef<Set<string>>(new Set());
+  const warmupRef = useRef<Set<string>>(new Set());
   const readOnly = status === "completed" || status === "skipped";
 
   const initialOrder = useMemo(() => {
@@ -115,9 +120,9 @@ export function WorkoutClient({
   const [drafts, setDrafts] = useState<Record<string, Draft>>(() => {
     const next: Record<string, Draft> = {};
     for (const exercise of exercises) {
-      const last = lastSets[exercise.key] ?? [];
+      const lastWorking = (lastSets[exercise.key] ?? []).filter((s) => !s.isWarmup);
       for (let i = 0; i < exercise.targetSets; i++) {
-        const source = last[i] ?? last[last.length - 1];
+        const source = lastWorking[i] ?? lastWorking[lastWorking.length - 1];
         next[`${exercise.key}:${i}`] = {
           weight: String(source?.weight ?? 0),
           reps: String(source?.reps ?? exercise.repMin),
@@ -129,13 +134,16 @@ export function WorkoutClient({
   const [rows, setRows] = useState<Record<string, number>>(() => {
     const next: Record<string, number> = {};
     for (const exercise of exercises) {
-      const done = existingSets.filter((s) => s.exerciseKey === exercise.key).length;
+      const done = existingSets.filter(
+        (s) => s.exerciseKey === exercise.key && !s.isWarmup,
+      ).length;
       next[exercise.key] = Math.max(exercise.targetSets, done + 1);
     }
     return next;
   });
   const [picker, setPicker] = useState<{ key: string; index: number } | null>(null);
   const [chipsByRow, setChipsByRow] = useState<Record<string, PickedPlate[]>>({});
+  const [stackByRow, setStackByRow] = useState<Record<string, number>>({});
   const [queueState, setQueueState] = useState<QueueSummary>({
     pending: 0,
     errors: 0,
@@ -196,10 +204,12 @@ export function WorkoutClient({
     index: number,
     opts?: { weight?: number; chips?: PickedPlate[] },
   ) {
+    const rowKey = `${key}:${index}`;
     const draft = drafts[`${key}:${index}`] ?? { weight: "0", reps: "0" };
     const weight = opts?.weight ?? (Number(draft.weight) || 0);
     const reps = Number(draft.reps) || 0;
-    const chips = opts?.chips ?? chipsByRow[`${key}:${index}`] ?? null;
+    const chips = opts?.chips ?? chipsByRow[rowKey] ?? null;
+    const stackPosition = stackByRow[rowKey] ?? null;
     if (reps <= 0) {
       setBanner("Add reps before logging the set.");
       return;
@@ -218,11 +228,17 @@ export function WorkoutClient({
       plates: chips,
       isWarmup: false,
       isPr: pr,
+      stackPosition,
     };
     setLogged((prev) => [...prev, local]);
     setChipsByRow((prev) => {
       const next = { ...prev };
-      delete next[`${key}:${index}`];
+      delete next[rowKey];
+      return next;
+    });
+    setStackByRow((prev) => {
+      const next = { ...prev };
+      delete next[rowKey];
       return next;
     });
     setBanner(null);
@@ -249,6 +265,7 @@ export function WorkoutClient({
         reps,
         is_warmup: false,
         is_pr: pr,
+        stack_position: stackPosition,
         client_updated_at: new Date().toISOString(),
       },
     });
@@ -256,6 +273,53 @@ export function WorkoutClient({
     const result = await flushQueue();
     if (result.errors.length > 0) {
       setBanner(`Set saved on this device, but the server rejected it: ${result.errors[0].error}`);
+    }
+  }
+
+  /** Logs a 5-rep warm-up at one of the ramp weights (negative set index). */
+  async function logWarmup(key: string, weight: number) {
+    const guard = `${key}:${Math.round(weight * 100)}`;
+    if (warmupRef.current.has(guard)) return;
+    warmupRef.current.add(guard);
+    try {
+      const id = newId();
+      const index = -(logged.filter((s) => s.exerciseKey === key && s.isWarmup).length + 1);
+      const local: WorkoutSet = {
+        id,
+        exerciseKey: key,
+        setIndex: index,
+        weight,
+        reps: 5,
+        plates: null,
+        isWarmup: true,
+        isPr: false,
+        stackPosition: null,
+      };
+      setLogged((prev) => [...prev, local]);
+      await enqueue({
+        id,
+        kind: "set_upsert",
+        data: {
+          session_id: sessionId,
+          exercise_key: key,
+          set_index: index,
+          weight_kg: toKg(weight, unit),
+          display_weight: weight,
+          display_unit: unit,
+          plates: null,
+          reps: 5,
+          is_warmup: true,
+          is_pr: false,
+          stack_position: null,
+          client_updated_at: new Date().toISOString(),
+        },
+      });
+      const result = await flushQueue();
+      if (result.errors.length > 0) {
+        setBanner(`Warm-up saved on this device, but the server rejected it: ${result.errors[0].error}`);
+      }
+    } finally {
+      warmupRef.current.delete(guard);
     }
   }
 
@@ -422,13 +486,18 @@ export function WorkoutClient({
           repMax: 12,
           incrementKg: 2.5,
           note: null,
+          equipmentIds: [],
         };
         const done = setsByExercise.get(key) ?? [];
-        const maxIndex = done.reduce((max, s) => Math.max(max, s.setIndex), -1);
+        const workingDone = done.filter((s) => !s.isWarmup);
+        const warmups = done.filter((s) => s.isWarmup);
+        const maxIndex = workingDone.reduce((max, s) => Math.max(max, s.setIndex), -1);
         const rowCount = readOnly
           ? maxIndex + 1
           : Math.max(rows[key] ?? exercise.targetSets, maxIndex + 2, 1);
         const last = lastSets[key];
+        const stack =
+          machineStacks.find((s) => exercise.equipmentIds.includes(s.equipmentId)) ?? null;
         const suggestion =
           last && last.length > 0
             ? suggestNextLoad({
@@ -448,9 +517,14 @@ export function WorkoutClient({
             : unit === "lb"
               ? suggestion.weightKg / 0.45359237
               : suggestion.weightKg;
+        const firstDraftWeight = Number(drafts[`${key}:0`]?.weight) || 0;
+        const workingPreview =
+          firstDraftWeight > 0
+            ? firstDraftWeight
+            : (suggestionDisplay ?? last?.find((s) => !s.isWarmup)?.weight ?? 0);
         const ramp =
-          last && last.length > 0 && exercise.incrementKg > 0
-            ? warmupRamp(suggestionDisplay ?? last[0].weight, barWeight)
+          workingPreview > 0 && exercise.incrementKg > 0
+            ? warmupRamp(workingPreview, barWeight)
             : [];
 
         return (
@@ -469,9 +543,27 @@ export function WorkoutClient({
                     Next: {round(suggestionDisplay)} {unit} · {suggestion.action}
                   </p>
                 )}
-                {ramp.length > 0 && (
+                {ramp.length > 0 && !readOnly && (
+                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                    <span className="text-[9px] font-extrabold uppercase tracking-wide text-neutral-400">
+                      Warm-up:
+                    </span>
+                    {ramp.map((r) => (
+                      <button
+                        key={r.label}
+                        type="button"
+                        onClick={() => void logWarmup(key, r.weight)}
+                        title={`Log ${r.label} warm-up · 5 reps`}
+                        className="border-2 border-neutral-900 bg-sky-100 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide shadow-[1px_1px_0_#111] hover:bg-sky-200"
+                      >
+                        {r.label} · {round(r.weight)} {unit}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {ramp.length > 0 && readOnly && (
                   <p className="mt-1 text-[10px] text-neutral-400">
-                    Warm-up: {ramp.map((r) => `${r.label} ${round(r.weight)}`).join(" · ")} {unit}
+                    Warm-up ramp: {ramp.map((r) => `${r.label} ${round(r.weight)}`).join(" · ")} {unit}
                   </p>
                 )}
                 {exercise.note && <p className="mt-1 text-[11px] italic text-neutral-400">{exercise.note}</p>}
@@ -493,6 +585,13 @@ export function WorkoutClient({
                       }
                       return next;
                     });
+                    setStackByRow((prev) => {
+                      const next = { ...prev };
+                      for (const k of Object.keys(next)) {
+                        if (k.startsWith(`${key}:`)) delete next[k];
+                      }
+                      return next;
+                    });
                   }}
                   className="border-2 border-neutral-900 bg-white px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide"
                 >
@@ -501,9 +600,37 @@ export function WorkoutClient({
               )}
             </div>
 
+            {warmups.length > 0 && (
+              <ul className="mt-3 space-y-1">
+                {warmups.map((w) => (
+                  <li
+                    key={w.id}
+                    className="flex items-center gap-2 border-2 border-sky-900 bg-sky-50 px-2 py-1.5"
+                  >
+                    <span className="w-12 text-[9px] font-extrabold uppercase tracking-wide text-sky-800">
+                      Warm-up
+                    </span>
+                    <span className="text-sm font-extrabold">
+                      {round(w.weight)} {unit} × {w.reps}
+                    </span>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => void removeSet(w)}
+                        className="ml-auto text-[10px] font-extrabold uppercase text-neutral-400 hover:text-red-600"
+                        aria-label="Remove warm-up set"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+
             <div className="mt-3 space-y-1.5">
               {Array.from({ length: rowCount }).map((_, index) => {
-                const doneSet = done.find((s) => s.setIndex === index);
+                const doneSet = workingDone.find((s) => s.setIndex === index);
                 if (doneSet) {
                   return (
                     <div
@@ -522,6 +649,11 @@ export function WorkoutClient({
                       {doneSet.plates && doneSet.plates.length > 0 && (
                         <span className="text-[10px] font-bold text-neutral-500">
                           {doneSet.plates.map((p) => `${p.label}×${p.qty}`).join(" + ")} /side
+                        </span>
+                      )}
+                      {doneSet.stackPosition != null && (
+                        <span className="text-[10px] font-bold text-neutral-500">
+                          · stack {doneSet.stackPosition}
                         </span>
                       )}
                       <span className="ml-auto text-[10px] font-extrabold uppercase text-emerald-700">✓</span>
@@ -549,11 +681,54 @@ export function WorkoutClient({
                       step="0.5"
                       min="0"
                       value={draft.weight}
-                      onChange={(e) => setDraft(key, index, "weight", e.target.value)}
+                      onChange={(e) => {
+                        setDraft(key, index, "weight", e.target.value);
+                        const rowKey = `${key}:${index}`;
+                        setStackByRow((prev) => {
+                          if (!(rowKey in prev)) return prev;
+                          const next = { ...prev };
+                          delete next[rowKey];
+                          return next;
+                        });
+                      }}
                       className="w-20 border-2 border-neutral-900 px-2 py-1.5 text-center text-base font-extrabold focus:shadow-[2px_2px_0_#111] focus:outline-none"
                       aria-label={`${exercise.name} set ${index + 1} weight`}
                     />
                     <span className="text-[10px] font-extrabold uppercase text-neutral-400">{unit}</span>
+                    {stack && (
+                      <select
+                        value={stackByRow[`${key}:${index}`] ?? ""}
+                        onChange={(e) => {
+                          const position = Number(e.target.value);
+                          const rowKey = `${key}:${index}`;
+                          if (!position) {
+                            setStackByRow((prev) => {
+                              const next = { ...prev };
+                              delete next[rowKey];
+                              return next;
+                            });
+                            return;
+                          }
+                          const kg = stackKg(position, {
+                            positionCount: stack.positionCount,
+                            points: stack.calibration,
+                          });
+                          if (kg == null) return;
+                          const display = unit === "lb" ? kg / 0.45359237 : kg;
+                          setDraft(key, index, "weight", String(round(display)));
+                          setStackByRow((prev) => ({ ...prev, [rowKey]: position }));
+                        }}
+                        className="border-2 border-neutral-900 bg-white px-1.5 py-1.5 text-[10px] font-extrabold uppercase"
+                        aria-label="Machine stack position"
+                      >
+                        <option value="">Stack…</option>
+                        {Array.from({ length: stack.positionCount }, (_, i) => i + 1).map((p) => (
+                          <option key={p} value={p}>
+                            {p}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     <button
                       type="button"
                       onClick={() => setPicker({ key, index })}
@@ -626,6 +801,11 @@ export function WorkoutClient({
             const rowKey = `${picker.key}:${picker.index}`;
             setDraft(picker.key, picker.index, "weight", String(weight));
             setChipsByRow((prev) => ({ ...prev, [rowKey]: chips }));
+            setStackByRow((prev) => {
+              const next = { ...prev };
+              delete next[rowKey];
+              return next;
+            });
             setPicker(null);
           }}
         />
