@@ -5,7 +5,7 @@ import { QuickLogForm } from "./progress/weight-forms";
 import { AiLogForm, CravingForm } from "./today-forms";
 import { setEntryStatusAction } from "./week/actions";
 import { mondayOf } from "@/lib/planner";
-import { formatIstDate, istDateISO } from "@/lib/date";
+import { formatIstDate, isDiaryDateISO, istDateISO } from "@/lib/date";
 import { WeighInReminder } from "@/components/weigh-in-reminder";
 import { SubmitButton } from "@/components/submit-button";
 import { getGymToday } from "@/lib/gym/data";
@@ -28,10 +28,11 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
   const supabase = await createClient();
   const today = istDateISO();
 
-  // The diary can look back at past days (?d=YYYY-MM-DD) — never into the future.
+  // The diary can look at any day (?d=YYYY-MM-DD), including future days that
+  // were logged ahead of time (AI "tomorrow" logs, planned meals).
   const { d } = await searchParams;
   const diaryDay =
-    typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && d <= today ? d : today;
+    typeof d === "string" && isDiaryDateISO(d) ? d : today;
 
   // Start the gym reads now so they overlap the household/plan queries.
   const gymTodayPromise = getGymToday(profile, today);
@@ -323,7 +324,7 @@ export default async function TodayPage({ searchParams }: PageProps<"/">) {
         </div>
         <div className="rounded-none border-2 border-neutral-900 bg-white p-4 shadow-[4px_4px_0_#111]">
           <h2 className="mb-3 text-sm font-extrabold uppercase tracking-widest text-neutral-500">AI meal log</h2>
-          <AiLogForm today={today} />
+          <AiLogForm key={diaryDay} today={today} initialDate={diaryDay} />
         </div>
       </section>
 

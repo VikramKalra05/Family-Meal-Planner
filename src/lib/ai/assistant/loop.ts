@@ -8,7 +8,7 @@ import {
   type ResolvedProvider,
 } from "@/lib/ai/provider";
 import { decryptSecret } from "@/lib/crypto";
-import { istDateISO, istHour } from "@/lib/date";
+import { istDateISO, istHour, parseDateHint } from "@/lib/date";
 import { buildContextSnapshot } from "./context";
 import { systemMessage } from "./prompt";
 import { photoAnalysisPrompt, photoAnalysisSchema } from "./photo";
@@ -203,7 +203,7 @@ async function runPhotoTurn(
       action: "log_meal_items",
       items: parsed.items,
       slot: slotForNow(),
-      date: istDateISO(),
+      date: parseDateHint(userText, istDateISO()) ?? istDateISO(),
     };
     const proposal: AssistantProposal = { action, summary: summarizeAction(action) };
     await persistMessage(

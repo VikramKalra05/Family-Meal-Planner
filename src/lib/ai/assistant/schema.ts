@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { draftRecipeSchema } from "@/lib/ai/recipes";
+import { isDiaryDateISO } from "@/lib/date";
 
 /**
  * Assistant action protocol. The model must answer every turn as JSON
@@ -13,7 +14,7 @@ import { draftRecipeSchema } from "@/lib/ai/recipes";
  *    executes, so a crafted or replayed payload can never skip validation.
  */
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
+const isoDate = z.string().refine(isDiaryDateISO, "Use a valid calendar date");
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:MM (24h)");
 const httpUrl = z
   .string()
@@ -107,6 +108,8 @@ const logMeal = z.object({
   /** Freeform description of what was eaten — parsed and logged. */
   text: z.string().trim().min(2).max(300),
   slot: slotEnum.optional(),
+  /** Day to log to; omit only when the user means today. */
+  date: isoDate.optional(),
 });
 
 /**
@@ -391,10 +394,10 @@ export type ChatTurn = z.infer<typeof chatTurnSchema>;
 export function summarizeAction(action: AssistantAction): string {
   switch (action.action) {
     case "log_meal":
-      return `Log meal: “${truncate(action.text, 60)}”${action.slot ? ` (${action.slot})` : ""}`;
+      return `Log meal: “${truncate(action.text, 60)}”${action.slot ? ` (${action.slot})` : ""}${action.date ? ` on ${action.date}` : ""}`;
     case "log_meal_items": {
       const total = action.items.reduce((sum, item) => sum + item.kcal, 0);
-      return `Log ${action.items.length} item${action.items.length === 1 ? "" : "s"} from photo (~${Math.round(total)} kcal)`;
+      return `Log ${action.items.length} item${action.items.length === 1 ? "" : "s"} from photo (~${Math.round(total)} kcal)${action.date ? ` on ${action.date}` : ""}`;
     }
     case "log_weight":
       return `Log today's weigh-in: ${action.weight_kg} kg`;

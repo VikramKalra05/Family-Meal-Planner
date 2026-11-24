@@ -98,9 +98,8 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
           <DatePicker
             value={date}
             onChange={(next) => {
-              if (next && next <= today) go(next);
+              if (next) go(next);
             }}
-            max={today}
             today={today}
             label="Diary date"
             format="compact"
@@ -109,7 +108,6 @@ export function IntakeDiary({ date, today, items, targets }: DiaryProps) {
           <button
             type="button"
             onClick={() => go(shiftISO(date, 1))}
-            disabled={date >= today}
             aria-label="Next day"
             className={smallBtn}
           >
@@ -457,7 +455,6 @@ function ItemForm({
             required
             value={itemDate}
             onChange={setItemDate}
-            max={today}
             today={today}
             label="Day"
             format="short"
