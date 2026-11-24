@@ -104,6 +104,23 @@ describe("assistantActionSchema", () => {
       assistantActionSchema.safeParse({ action: "log_meal_items", items: [] }).success,
     ).toBe(false);
   });
+
+  it("accepts a log_meal target date and rejects impossible calendar days", () => {
+    const past = assistantActionSchema.parse({
+      action: "log_meal",
+      text: "2 roti and dal",
+      date: "2026-11-24",
+    });
+    expect(summarizeAction(past)).toContain("2026-11-24");
+    expect(
+      assistantActionSchema.safeParse({ action: "log_meal", text: "2 roti", date: "2026-11-26" })
+        .success,
+    ).toBe(true);
+    expect(
+      assistantActionSchema.safeParse({ action: "log_meal", text: "2 roti", date: "2026-02-30" })
+        .success,
+    ).toBe(false);
+  });
 });
 
 describe("chatTurnSchema", () => {

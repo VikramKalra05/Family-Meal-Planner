@@ -625,10 +625,11 @@ export async function executeMutationAction(
 
       const hour = istHour();
       const slot = action.slot ?? (hour < 11 ? "breakfast" : hour < 16 ? "lunch" : hour < 19 ? "snack" : "dinner");
+      const date = action.date ?? istDateISO();
       await supabase.from("intake_logs").insert(
         items.map((i) => ({
           member_id: profile.id,
-          logged_on: istDateISO(),
+          logged_on: date,
           slot,
           description: intakeDescription(i),
           kcal: i.kcal,
@@ -639,7 +640,8 @@ export async function executeMutationAction(
           source: "ai_chat",
         })),
       );
-      return { ok: true, message: `Logged ${items.length} item${items.length > 1 ? "s" : ""} (~${Math.round(totalKcal)} kcal) to ${slot}.` };
+      const when = date === istDateISO() ? "" : ` on ${date}`;
+      return { ok: true, message: `Logged ${items.length} item${items.length > 1 ? "s" : ""} (~${Math.round(totalKcal)} kcal) to ${slot}${when}.` };
     }
 
     case "log_meal_items": {
@@ -667,9 +669,10 @@ export async function executeMutationAction(
         })),
       );
       if (error) return { ok: false, message: error.message };
+      const when = date === istDateISO() ? "" : ` on ${date}`;
       return {
         ok: true,
-        message: `Logged ${action.items.length} item${action.items.length === 1 ? "" : "s"} from the photo (~${Math.round(totalKcal)} kcal) to ${slot}.`,
+        message: `Logged ${action.items.length} item${action.items.length === 1 ? "" : "s"} from the photo (~${Math.round(totalKcal)} kcal) to ${slot}${when}.`,
       };
     }
 

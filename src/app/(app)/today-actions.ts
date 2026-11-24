@@ -7,7 +7,7 @@ import { candidatesFor, type PlannerMember, type SlotKey } from "@/lib/planner";
 import { checkRate, rateLimited } from "@/lib/rate-limit";
 import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
-import { istDateISO, istHour } from "@/lib/date";
+import { istDateISO, istHour, isDiaryDateISO, parseDateHint } from "@/lib/date";
 import {
   MEAL_COMMAND_SYSTEM,
   intakeDescription,
@@ -28,7 +28,10 @@ export type AiLogDraft =
       description: string;
       fromSlot: MealSlot;
       toSlot: MealSlot;
+      /** Day the item is currently logged on. */
       date: string;
+      /** Day to move it to. */
+      toDate: string;
     };
 
 export type IntakeActionState = {
@@ -47,10 +50,7 @@ const aiLogDraftSchema = z.discriminatedUnion("kind", [
     kind: z.literal("log"),
     items: z.array(mealParseItemSchema).min(1).max(15),
     slot: z.enum(SLOT_VALUES),
-    date: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
-      .refine((d) => d <= todayISO(), "Cannot log a future day"),
+    date: z.string().refine(isDiaryDateISO, "Use a valid calendar date"),
   }),
   z.object({
     kind: z.literal("move"),
@@ -58,10 +58,8 @@ const aiLogDraftSchema = z.discriminatedUnion("kind", [
     description: z.string().min(1).max(120),
     fromSlot: z.enum(SLOT_VALUES),
     toSlot: z.enum(SLOT_VALUES),
-    date: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
-      .refine((d) => d <= todayISO(), "Cannot move a future day"),
+    date: z.string().refine(isDiaryDateISO, "Use a valid calendar date"),
+    toDate: z.string().refine(isDiaryDateISO, "Use a valid calendar date"),
   }),
 ]);
 
@@ -213,7 +211,7 @@ async function resolveMove(
   memberId: string,
   command: MealMoveCommand,
   date: string,
-): Promise<{ draft: Extract<AiLogDraft, { kind: "move" }> } | { error: string } | { info: string }> {
+): Promise<{ draft: Extract<AiLogDraft, { kind: "move" }> } | { error: string }> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("intake_logs")
@@ -222,27 +220,29 @@ async function resolveMove(
     .eq("logged_on", date)
     .order("created_at");
   const rows = (data ?? []) as IntakeMatchRow[];
-  const match = findIntakeMatch(rows, command.item, command.fromSlot);
+  const matching = findIntakeMatch(rows, command.item, command.fromSlot);
+  const dayLabel = date === todayISO() ? "today's" : `${date}'s`;
 
-  if (!match) {
+  if (!matching) {
     return {
-      error: `I couldn't find “${command.item}” in today's ${command.fromSlot ?? "diary"}. Check the item's name in the diary and try again.`,
+      error: `I couldn't find “${command.item}” in ${dayLabel} ${command.fromSlot ?? "diary"}. Check the item's name in the diary and try again.`,
     };
   }
-  if ("ambiguous" in match) {
+  if ("ambiguous" in matching) {
     return {
-      error: `“${command.item}” matches more than one item: ${match.ambiguous
+      error: `“${command.item}” matches more than one item: ${matching.ambiguous
         .map((r) => r.description ?? "unnamed")
         .join("; ")}. Be more specific or use the pencil on the diary row.`,
     };
   }
 
-  const row = match.row;
+  const row = matching.row;
   if (!SLOT_VALUES.includes(row.slot as (typeof SLOT_VALUES)[number])) {
     return { error: "That item has an unknown meal slot — edit it from the diary." };
   }
-  if (row.slot === command.toSlot) {
-    return { info: `“${row.description ?? command.item}” is already in ${slotLabel(row.slot)}.` };
+  const targetSlot = command.toSlot ?? (row.slot as MealSlot);
+  if (!SLOT_VALUES.includes(targetSlot)) {
+    return { error: "That target meal is not valid." };
   }
 
   return {
@@ -251,8 +251,9 @@ async function resolveMove(
       rowId: row.id,
       description: row.description ?? command.item,
       fromSlot: row.slot as MealSlot,
-      toSlot: command.toSlot,
+      toSlot: targetSlot,
       date,
+      toDate: date,
     },
   };
 }
@@ -271,6 +272,12 @@ export async function aiLogIntakeAction(
 
   if (mode === "cancel") return { error: null, ok: null, draft: null };
   if (mode === "confirm") return confirmAiLog(profile.id, formData);
+
+  const requestedDate = z
+    .string()
+    .refine(isDiaryDateISO, "Use a valid calendar date")
+    .safeParse(formData.get("date"));
+  const date = requestedDate.success ? requestedDate.data : todayISO();
 
   const text = z.string().trim().min(2, "Tell me what you ate").max(500).safeParse(formData.get("text"));
   if (!text.success) return { error: text.error.issues[0]?.message ?? "Invalid input", ok: null };
@@ -301,9 +308,8 @@ export async function aiLogIntakeAction(
   }
 
   if (command.action === "move") {
-    const resolved = await resolveMove(profile.id, command, todayISO());
+    const resolved = await resolveMove(profile.id, command, date);
     if ("error" in resolved) return { error: resolved.error, ok: null, draft: null };
-    if ("info" in resolved) return { error: null, ok: resolved.info, draft: null };
     return { error: null, ok: null, draft: resolved.draft };
   }
 
@@ -320,7 +326,9 @@ export async function aiLogIntakeAction(
       kind: "log",
       items,
       slot: command.slot ?? slotForNow(),
-      date: todayISO(),
+      // A day named inside the message ("log yesterday's dinner") wins over
+      // the picker; the review card shows it before anything is written.
+      date: parseDateHint(text.data, todayISO()) ?? date,
     },
   };
 }
@@ -357,28 +365,33 @@ async function confirmAiLog(memberId: string, formData: FormData): Promise<Intak
   if (draft.kind === "move") {
     const { data: row } = await supabase
       .from("intake_logs")
-      .select("id, description, slot")
+      .select("id, description, slot, logged_on")
       .eq("id", draft.rowId)
       .eq("member_id", memberId)
       .maybeSingle();
     if (!row) {
       return { error: "That item is no longer in your diary — refresh and try again.", ok: null, draft: null };
     }
-    if (row.slot === draft.toSlot) {
-      return { error: null, ok: `It's already in ${slotLabel(draft.toSlot)}.`, draft: null };
+    if (row.slot === draft.toSlot && row.logged_on === draft.toDate) {
+      return {
+        error: null,
+        ok: `It's already in ${slotLabel(draft.toSlot)} on ${draft.toDate}.`,
+        draft: null,
+      };
     }
 
     const { error } = await supabase
       .from("intake_logs")
-      .update({ slot: draft.toSlot })
+      .update({ slot: draft.toSlot, logged_on: draft.toDate })
       .eq("id", draft.rowId)
       .eq("member_id", memberId);
     if (error) return { error: error.message, ok: null, draft };
 
     revalidatePath("/");
+    const when = (date: string) => (date === todayISO() ? "today" : date);
     return {
       error: null,
-      ok: `Moved “${row.description ?? draft.description}” from ${slotLabel(row.slot)} to ${slotLabel(draft.toSlot)}.`,
+      ok: `Moved “${row.description ?? draft.description}” from ${when(row.logged_on)} ${slotLabel(row.slot)} to ${when(draft.toDate)} ${slotLabel(draft.toSlot)}.`,
       draft: null,
     };
   }
@@ -406,9 +419,10 @@ async function confirmAiLog(memberId: string, formData: FormData): Promise<Intak
   if (error) return { error: error.message, ok: null, draft };
 
   revalidatePath("/");
+  const when = date === todayISO() ? "" : ` on ${date}`;
   return {
     error: null,
-    ok: `Logged ${items.length} item${items.length > 1 ? "s" : ""} (~${Math.round(totalKcal)} kcal) to ${slotLabel(slot)}.`,
+    ok: `Logged ${items.length} item${items.length > 1 ? "s" : ""} (~${Math.round(totalKcal)} kcal) to ${slotLabel(slot)}${when}.`,
     draft: null,
   };
 }

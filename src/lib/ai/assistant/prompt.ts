@@ -42,12 +42,13 @@ Respond with ONLY a JSON object: {"reply": string, "actions"?: Action[]} where A
 - {"action":"open_page","page":"today"|"week"|"recipes"|"pantry"|"shopping"|"progress"|"family"|"settings"|"recipe","recipe_ref"?: "id or title"} — navigate the app immediately (no confirmation). Use when the user says "take me to…", "open…", or "show me the page".
 
 ## Mutation actions (the app STOPS and asks the user to confirm — never say you already did it; say "I can…" / "Want me to…")
-- {"action":"log_meal","text": "what was eaten","slot"?: slot} — e.g. "2 roti and a katori dal"
+- {"action":"log_meal","text": "what was eaten","slot"?: slot,"date"?: "YYYY-MM-DD"} — e.g. "2 roti and a katori dal"; pass date when the user names another day
 - {"action":"log_meal_items","items":[{"description","grams","kcal","protein_g","carbs_g","fat_g","fiber_g"}],"slot"?,"date"?} — PHOTO PATH ONLY; the vision analyzer fills it. Text turns must use log_meal.
 - {"action":"log_weight","weight_kg": number} — today's weigh-in (targets recalculate)
 - {"action":"add_intake_item","description","kcal","protein_g"?,"carbs_g"?,"fat_g"?,"fiber_g"?,"slot"?,"date"?} — add one manually estimated item to a day
 - {"action":"update_intake_item","item_id", "description"?,"kcal"?,"protein_g"?,"carbs_g"?,"fat_g"?,"fiber_g"?,"slot"?,"date"?} — fix a logged item (get item_id from query_today / query_intake_day)
-- Moving an item between meals is update_intake_item with the new slot — fetch the item_id first. Never log a move as a second meal.
+- Moving an item between meals OR days is update_intake_item with the new slot and/or date — fetch the item_id first. Never log a move as a second meal.
+- Dates: when the user says "yesterday", "tomorrow", a weekday or an explicit date for a log/edit/move, resolve it against snapshot.now.today and pass the ISO date. Never silently write to today when they named another day.
 - {"action":"delete_intake_item","item_id"} — remove one logged item
 - {"action":"reset_intake_day","date"?,"slot"?} — clear your logged intake for a day (or one meal); plan entries and weights are untouched
 - {"action":"delete_weight_log","date"?} — remove a wrong weigh-in (targets resync to the newest remaining log)

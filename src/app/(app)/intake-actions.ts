@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireFullProfile } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
-import { istDateISO } from "@/lib/date";
+import { isDiaryDateISO } from "@/lib/date";
 
 /**
  * Food-diary writes. Every action is RLS-scoped and also filters by
@@ -17,10 +17,7 @@ export type IntakeEditState = { error: string | null; ok: string | null; ts: num
 const init = { error: null, ok: null, ts: 0 } satisfies IntakeEditState;
 
 const slotEnum = z.enum(["breakfast", "lunch", "snack", "dinner"]);
-const isoDate = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
-  .refine((d) => d <= istDateISO(), "That day is in the future");
+const isoDate = z.string().refine(isDiaryDateISO, "Use a valid calendar date");
 
 const itemFields = z.object({
   description: z.string().trim().min(1, "Name the food").max(120),
